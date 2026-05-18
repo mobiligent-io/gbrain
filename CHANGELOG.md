@@ -2,7 +2,7 @@
 
 All notable changes to GBrain will be documented in this file.
 
-## [0.36.0.0] - 2026-05-17
+## [0.36.4.0] - 2026-05-17
 
 **Your photos finally show up when you ask. The brain just got eyes.**
 **11K image embeddings stopped sitting unused; cross-modal search is live.**
@@ -52,7 +52,7 @@ gbrain config set search.unified_multimodal true
 
 Auto-flip prompt fires at coverage=100% so the last step is suggested inline.
 
-### To take advantage of v0.36.0.0
+### To take advantage of v0.36.4.0
 
 `gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor` warns about anything:
 
