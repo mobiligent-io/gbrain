@@ -42,8 +42,12 @@ function baseKnobs(): ResolvedSearchKnobs {
 }
 
 describe('KNOBS_HASH_VERSION + version invariants', () => {
-  test('version is 2 (CDX1-F14: bumped from 1 to fold reranker fields in)', () => {
-    expect(KNOBS_HASH_VERSION).toBe(2);
+  test('version is 3 (v0.36 cross-modal wave: bumped from 2 to fold cross-modal knobs in)', () => {
+    // v0.35: 1→2 to fold reranker fields. v0.36: 2→3 to fold cross-modal
+    // knobs (D2 cache contamination fix). When this bumps, the prior
+    // version's cache rows distinguish naturally via the version prefix
+    // in the hash input — duplicate rows clear within cache.ttl_seconds.
+    expect(KNOBS_HASH_VERSION).toBe(3);
   });
 
   test('hash is 16 hex chars regardless of reranker config', () => {

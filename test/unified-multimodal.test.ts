@@ -12,6 +12,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
+import { withEnv } from './helpers/with-env.ts';
 import {
   configureGateway,
   resetGateway,
@@ -81,18 +82,13 @@ describe('reindex --multimodal command (Phase 3)', () => {
   });
 
   test('GBRAIN_NO_REEMBED=1 honored on zero-pending brain (skip path is no-op-clean)', async () => {
-    const orig = process.env.GBRAIN_NO_REEMBED;
-    process.env.GBRAIN_NO_REEMBED = '1';
-    try {
+    await withEnv({ GBRAIN_NO_REEMBED: '1' }, async () => {
       const result = await runReindexMultimodal(engine, {});
       // Zero pending → reindex short-circuits before the env-var check; both
       // paths produce dry_run=false + reembedded=0 + pending=0.
       expect(result.reembedded).toBe(0);
       expect(result.pending_after).toBe(0);
-    } finally {
-      if (orig === undefined) delete process.env.GBRAIN_NO_REEMBED;
-      else process.env.GBRAIN_NO_REEMBED = orig;
-    }
+    });
   });
 
   test('zero-pending returns cleanly', async () => {

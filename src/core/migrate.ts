@@ -3203,10 +3203,14 @@ export const MIGRATIONS: Migration[] = [
         model TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
-      CREATE INDEX IF NOT EXISTS idx_mcp_spend_log_client_day
-        ON mcp_spend_log (client_id, date_trunc('day', created_at));
-      CREATE INDEX IF NOT EXISTS idx_mcp_spend_log_token_day
-        ON mcp_spend_log (token_name, date_trunc('day', created_at));
+      -- BTREE on (client_id, created_at) covers the per-day rollup query
+      -- (SELECT SUM ... WHERE client_id = $ AND created_at >= today_start) via
+      -- range scan on created_at. date_trunc in an index expression would
+      -- require IMMUTABLE — TIMESTAMPTZ truncation depends on session timezone.
+      CREATE INDEX IF NOT EXISTS idx_mcp_spend_log_client_time
+        ON mcp_spend_log (client_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_mcp_spend_log_token_time
+        ON mcp_spend_log (token_name, created_at);
     `,
     sqlFor: {
       pglite: `
@@ -3220,9 +3224,9 @@ export const MIGRATIONS: Migration[] = [
           model TEXT,
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
-        CREATE INDEX IF NOT EXISTS idx_mcp_spend_log_client
+        CREATE INDEX IF NOT EXISTS idx_mcp_spend_log_client_time
           ON mcp_spend_log (client_id, created_at);
-        CREATE INDEX IF NOT EXISTS idx_mcp_spend_log_token
+        CREATE INDEX IF NOT EXISTS idx_mcp_spend_log_token_time
           ON mcp_spend_log (token_name, created_at);
       `,
     },
