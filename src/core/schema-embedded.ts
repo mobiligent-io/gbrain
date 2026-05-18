@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS content_chunks (
   modality              TEXT NOT NULL DEFAULT 'text',
   embedding_image       vector(1024),
   -- v0.36 Phase 3 cross-modal: unified column populated by reindex.
-  -- Migration v68 also adds it for upgrade paths.
+  -- Migration v70 also adds it for upgrade paths.
   embedding_multimodal  vector(1024)
 );
 

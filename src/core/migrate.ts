@@ -3151,7 +3151,7 @@ export const MIGRATIONS: Migration[] = [
     `,
   },
   {
-    version: 68,
+    version: 70,
     name: 'embedding_multimodal_column',
     // D20 Phase 3: add the unified-multimodal vector column to content_chunks.
     //
@@ -3179,7 +3179,7 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    version: 67,
+    version: 69,
     name: 'mcp_spend_log',
     // D23-#6: per-OAuth-client paid-API spend tracking. search_by_image
     // (Phase 2 of cross-modal wave) makes paid Voyage calls on behalf of

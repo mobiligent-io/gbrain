@@ -20,12 +20,12 @@ Default behavior unchanged for normal text queries. Cross-modal routing fires on
 | 0 | Multimodal embed batching + partial-failure surfacing + query-side wrappers; new SSRF-validate helper with DNS rebinding defense | Foundation for Phase 3 reindex; every URL-fetching feature gets DNS-resolution + per-record A/AAAA inspection |
 | 1 | Text → image search: cross-modal intent regex + hybrid routing + weighted RRF for `'both'` mode + 7 new search knobs in `SEARCH_MODE_CONFIG_KEYS` and `knobsHash` (bumped 2→3) + `gbrain backfill modality` cleanup + doctor check | "show me hackathon photos" now finds image chunks; cache contamination across modality knobs closed |
 | 2 | Image → text/OCR search: `loadImageInput` with SSRF redirect re-validation + 10 MB cap + magic-byte sniff; `search_by_image` MCP op with remote `image_path` ban + daily Voyage spend cap per OAuth client | `gbrain search --image ./photo.jpg "who is this person"` runs; remote MCP clients can submit URLs / base64 but cannot read arbitrary server files |
-| 3 | Phase 3 unified column: schema migration v68 adds `content_chunks.embedding_multimodal vector(1024)`; `gbrain reindex --multimodal` walks NULL rows with checkpoint resume + cost prompt + writer lock; hybrid routing through unified column when `search.unified_multimodal=true` with fail-open + source-aware coverage check | Operators opt into true image→full-text-knowledge retrieval (Phase 2 then auto-upgrades to richer results) |
+| 3 | Phase 3 unified column: schema migration v70 adds `content_chunks.embedding_multimodal vector(1024)`; `gbrain reindex --multimodal` walks NULL rows with checkpoint resume + cost prompt + writer lock; hybrid routing through unified column when `search.unified_multimodal=true` with fail-open + source-aware coverage check | Operators opt into true image→full-text-knowledge retrieval (Phase 2 then auto-upgrades to richer results) |
 | 4 | Opt-in LLM tie-break: when `search.cross_modal.llm_intent=true` AND regex returns 'text' AND query is genuinely ambiguous, a Haiku call refines the routing | Catches "any pictures from last week's offsite?" — the narrow band the regex misses (<1% of queries when on; ~$0.0001 per escalation; fail-open on every error) |
 
 ### The numbers that matter
 
-51 new test cases across 8 test files. 6860 unit tests pass after the wave (0 regressions). 620+ E2E tests pass against real Postgres. Schema migrations applied cleanly through v68.
+51 new test cases across 8 test files. 6860 unit tests pass after the wave (0 regressions). 620+ E2E tests pass against real Postgres. Schema migrations applied cleanly through v70.
 
 | Surface | Before | After | What changed |
 |---|---|---|---|
@@ -89,10 +89,10 @@ Auto-flip prompt fires at coverage=100% so the last step is suggested inline.
 - `src/core/search/by-image.ts`: `searchByImage` always runs image branch; D13 hybrid intersect runs parallel text branch when `query` is provided.
 - `src/core/operations.ts`: new `search_by_image` op (scope: read, NOT localOnly). Remote callers with `image_path` set rejected with permission_denied. Source-id threaded via sourceScopeOpts. Per-param length cap. Pre-flight budget gate + post-call spend record.
 - `src/core/spend-log.ts`: BudgetExceededError + checkBudget + recordSpend + getTodaySpendCents. UTC day-aligned. Local CLI bypasses gate; pre-v0.36 brains fail open.
-- `src/core/migrate.ts` v67: new `mcp_spend_log` table + BTREE indexes.
+- `src/core/migrate.ts` v69: new `mcp_spend_log` table + BTREE indexes.
 
 #### Phase 3 — unified multimodal column
-- `src/core/migrate.ts` v68: `ALTER TABLE content_chunks ADD COLUMN embedding_multimodal vector(1024)`. Column-only — HNSW partial index deferred to post-reindex build per pgvector best practice.
+- `src/core/migrate.ts` v70: `ALTER TABLE content_chunks ADD COLUMN embedding_multimodal vector(1024)`. Column-only — HNSW partial index deferred to post-reindex build per pgvector best practice.
 - `src/schema.sql` + `src/core/pglite-schema.ts`: column added inline so fresh installs land at head.
 - `src/core/types.ts`: `SearchOpts.embeddingColumn` type widened to include `'embedding_multimodal'`.
 - `src/core/postgres-engine.ts` + `src/core/pglite-engine.ts` `searchVector`: route to unified column when opts set. NO modality filter (column carries both text + image).
