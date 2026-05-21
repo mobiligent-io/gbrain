@@ -17,6 +17,7 @@ import {
   type SourceTier,
 } from '../src/core/source-resolver.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
+import { withEnv } from './helpers/with-env.ts';
 
 // Stub engine same shape as source-resolver.test.ts
 function makeStub(
@@ -73,15 +74,12 @@ describe('resolveSourceWithTier — tier 1 (flag)', () => {
 describe('resolveSourceWithTier — tier 2 (env)', () => {
   test('GBRAIN_SOURCE env returns tier=env when no flag', async () => {
     const engine = makeStub(['default', 'wiki'], [], null);
-    process.env.GBRAIN_SOURCE = 'wiki';
-    try {
+    await withEnv({ GBRAIN_SOURCE: 'wiki' }, async () => {
       const result = await resolveSourceWithTier(engine, null, '/tmp');
       expect(result.source_id).toBe('wiki');
       expect(result.tier).toBe('env');
       expect(result.detail).toBe('GBRAIN_SOURCE=wiki');
-    } finally {
-      delete process.env.GBRAIN_SOURCE;
-    }
+    });
   });
 });
 
@@ -170,17 +168,14 @@ describe('resolveSourceWithTier — priority assertion', () => {
       [],
       'default-src',
     );
-    process.env.GBRAIN_SOURCE = 'env-src';
-    try {
+    await withEnv({ GBRAIN_SOURCE: 'env-src' }, async () => {
       // Flag highest priority
       const r1 = await resolveSourceWithTier(engine, 'flag-src', '/tmp');
       expect(r1.tier).toBe('flag');
       // Without flag → env
       const r2 = await resolveSourceWithTier(engine, null, '/tmp');
       expect(r2.tier).toBe('env');
-    } finally {
-      delete process.env.GBRAIN_SOURCE;
-    }
+    });
   });
 });
 
