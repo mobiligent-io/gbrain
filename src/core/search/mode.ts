@@ -530,6 +530,17 @@ export interface KnobsHashContext {
   embeddingColumn?: string;
   /** Resolved provider:model, e.g. 'voyage:voyage-3-large'. */
   embeddingModel?: string;
+  /**
+   * v0.39 T21 + codex finding #5: cache + eval pack isolation. A cache
+   * row written when pack `garry-pack@1.2` was active must NEVER be
+   * served when pack `research-state@0.5` is active — they may resolve
+   * different type closures for the same query. The hash folds in
+   * pack name + version so cross-pack contamination is structurally
+   * impossible. Undefined falls back to the literal 'none' for
+   * backward compat with callers that don't yet thread pack identity.
+   */
+  schemaPack?: string;
+  schemaPackVersion?: string;
 }
 
 export function knobsHash(
@@ -579,9 +590,16 @@ export function knobsHash(
     // must never be served from a row that ran against `embedding`.
     `col=${ctx?.embeddingColumn ?? 'embedding'}`,
     `prov=${ctx?.embeddingModel ?? 'default'}`,
-    // v=4 additions (append-only). graph_signals participates so a
-    // graph-on write cannot be served to a graph-off lookup.
+    // v=4 additions (append-only).
+    //   graph_signals (v0.40.4): graph-on write must not be served to a
+    //     graph-off lookup.
+    //   schema-pack name + version (v0.39 T21 / codex #5): cross-pack
+    //     contamination is structurally impossible — a query that
+    //     resolved type `researcher` against pack A cannot be served
+    //     from a row that resolved against pack B.
     `gs=${knobs.graph_signals ? 1 : 0}`,
+    `pack=${ctx?.schemaPack ?? 'none'}`,
+    `pver=${ctx?.schemaPackVersion ?? 'none'}`,
   ];
   const h = createHash('sha256');
   h.update(parts.join('|'));
