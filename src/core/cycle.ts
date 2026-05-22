@@ -1649,6 +1649,28 @@ export async function runCycle(
   const totals = extractTotals(phaseResults);
   const status = deriveStatus(phaseResults, totals);
 
+  // v0.38 (codex r1 P0-5): persist per-source cycle completion timestamp
+  // when the cycle ran successfully against an explicit source. Read by
+  // autopilot's per-source freshness gate next tick. Skipped when:
+  //   - opts.sourceId is unset (legacy callers — autopilot still here)
+  //   - engine is null (no-DB path)
+  //   - status is 'failed' or 'skipped' (don't mark a non-run as fresh)
+  //   - dryRun (writes are out of scope)
+  //
+  // Best-effort: a write failure does NOT change the CycleReport status.
+  // The cost of writing the wrong timestamp post-failure is higher than
+  // the cost of missing a successful write (next cycle will redo work).
+  if (opts.sourceId && engine && !dryRun && (status === 'ok' || status === 'clean' || status === 'partial')) {
+    try {
+      await engine.updateSourceConfig(opts.sourceId, {
+        last_full_cycle_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      // Best-effort; cycle already succeeded by the time we get here.
+      console.warn(`[cycle] failed to write last_full_cycle_at for source ${opts.sourceId}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   return {
     schema_version: '1',
     timestamp,
