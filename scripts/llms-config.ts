@@ -122,13 +122,34 @@ export const SECTIONS: DocSection[] = [
       {
         title: "docs/guides/scaling-skills.md",
         description:
-          "Three-tier architecture for agents with 300+ skills: always-loaded, resolver-routed, and dormant. Per-turn token math, the v0.40.11.0 compact list-format resolver, and the `gbrain doctor` safety net. 306 skills, ~21K tokens freed per turn, zero capability loss.",
+          "Three-tier architecture for agents with 300+ skills: always-loaded, resolver-routed, and dormant. Per-turn token math, the v0.41.7.0 compact list-format resolver, and the `gbrain doctor` safety net. 306 skills, ~21K tokens freed per turn, zero capability loss.",
         path: "docs/guides/scaling-skills.md",
       },
       {
         title: "docs/mcp/DEPLOY.md",
         description: "MCP server deployment.",
         path: "docs/mcp/DEPLOY.md",
+      },
+    ],
+  },
+  {
+    heading: "AI providers",
+    entries: [
+      {
+        title: "docs/ai-providers/zeroentropy.md",
+        description:
+          "ZeroEntropy zembed-1 embedding + zerank-2 reranker (hosted): API key, embedding switch, reranker config.",
+        path: "docs/ai-providers/zeroentropy.md",
+        // Setup walkthrough — discoverable in the index, not inlined in the
+        // single-fetch bundle (keeps llms-full.txt under FULL_SIZE_BUDGET).
+        includeInFull: false,
+      },
+      {
+        title: "docs/ai-providers/llama-server-reranker.md",
+        description:
+          "Local reranker via llama.cpp --reranking: Qwen3-Reranker or self-hosted ZE weights, --alias setup, gbrain config keys, cold-start timeout, budget-cap interaction.",
+        path: "docs/ai-providers/llama-server-reranker.md",
+        includeInFull: false,
       },
     ],
   },
@@ -161,10 +182,10 @@ export const SECTIONS: DocSection[] = [
         description:
           "Patches for downstream agent skill forks. One section per release.",
         path: "docs/UPGRADING_DOWNSTREAM_AGENTS.md",
-        // Excluded from inlined bundle (v0.40.11.0): 25KB of release-by-release
+        // Excluded from inlined bundle (v0.41.7.0): 25KB of release-by-release
         // migration patches that are valuable as a reference but don't need
         // to ride along in every llms-full.txt fetch. Pushes the bundle back
-        // under FULL_SIZE_BUDGET after the v0.40.11.0 scaling-skills guide
+        // under FULL_SIZE_BUDGET after the v0.41.7.0 scaling-skills guide
         // landed.
         includeInFull: false,
       },
