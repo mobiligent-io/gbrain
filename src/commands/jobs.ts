@@ -1551,7 +1551,27 @@ export async function registerBuiltinHandlers(worker: MinionWorker, engine: Brai
     return await makeEmbedBackfillHandler(engine)(job);
   });
 
-  process.stderr.write('[minion worker] brain-health-100 handlers registered (11 ops, 3 protected) + embed-backfill (v0.40)\n');
+  // v0.42.0.0 (A13): embed-catch-up handler for the gbrain onboard
+  // remediation pipeline. Wraps runEmbedCore with stale + catchUp + the
+  // priority/batchSize the recommendation supplies. NOT in
+  // PROTECTED_JOB_NAMES (embedding spend only).
+  worker.register('embed-catch-up', async (job) => {
+    const { runEmbedCore } = await import('./embed.ts');
+    const data = (job.data ?? {}) as {
+      sourceId?: string;
+      batchSize?: number;
+      priority?: 'recent';
+    };
+    return await runEmbedCore(engine, {
+      stale: true,
+      catchUp: true,
+      batchSize: data.batchSize,
+      priority: data.priority,
+      sourceId: data.sourceId,
+    });
+  });
+
+  process.stderr.write('[minion worker] brain-health-100 handlers registered (11 ops, 3 protected) + embed-backfill (v0.40) + embed-catch-up (v0.42)\n');
 
   // Plugin discovery — one line per discovered plugin (mirrors the
   // openclaw-seam startup line convention from v0.11+). Loaded
