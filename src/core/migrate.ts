@@ -4821,7 +4821,7 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 106,
     name: 'page_generation_clock_and_statement_trigger',
-    // v0.41.23.0 (D18/D19, codex outside-voice on /plan-eng-review): global
+    // v0.41.25.0 (D18/D19, codex outside-voice on /plan-eng-review): global
     // page-generation clock + statement-level trigger.
     //
     // Renumbered v104 → v105 → v106 during master merges: PR #1545 (master's
@@ -4829,7 +4829,7 @@ export const MIGRATIONS: Migration[] = [
     // PR #1542 (master's v0.41.22.0 type-unification cathedral) took v105
     // for slug_aliases ahead of this PR landing.
     //
-    // Why this exists: the pre-v0.41.23.0 query-cache Layer 1 bookmark read
+    // Why this exists: the pre-v0.41.25.0 query-cache Layer 1 bookmark read
     // `MAX(generation) FROM pages` to detect "writes happened since cache
     // store". Two bugs in that contract — independent of any sync work:
     //
@@ -4857,7 +4857,7 @@ export const MIGRATIONS: Migration[] = [
     //
     // Mirror lives in src/core/pglite-schema.ts (fresh-install path).
     // Forward-reference bootstrap probe in applyForwardReferenceBootstrap
-    // on both engines so pre-v0.41.23.0 brains pick it up cleanly.
+    // on both engines so pre-v0.41.25.0 brains pick it up cleanly.
     idempotent: true,
     sql: `
       CREATE TABLE IF NOT EXISTS page_generation_clock (

@@ -2,7 +2,7 @@
 
 All notable changes to GBrain will be documented in this file.
 
-## [0.41.23.0] - 2026-05-27
+## [0.41.25.0] - 2026-05-27
 
 **Big-delete syncs no longer choke your brain — and your search results
 were silently going stale in a different way that's now fixed.**
