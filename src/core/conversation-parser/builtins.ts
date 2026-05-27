@@ -121,9 +121,9 @@ export const BUILTIN_PATTERNS: readonly PatternEntry[] = [
 
   {
     // v0.41.18+ (D-FOLLOWUP-1.B closes the user-facing half of #1533):
-    // matches the shape Circleback meeting exports use after the
-    // wintermute meeting-ingestion pipeline reformats them. Two
-    // sub-shapes in the wild (verified across ~/git/brain/meetings):
+    // matches the shape Circleback meeting exports use after an
+    // OpenClaw meeting-ingestion pipeline reformats them. Two
+    // sub-shapes in the wild (verified across a 367-file corpus):
     //   **Participant 2** (00:00): Companies that we have...      ← (HH:MM)
     //   **Participant 1** (00:00:00): We found the apostrophes...  ← (HH:MM:SS)
     //
@@ -175,7 +175,7 @@ export const BUILTIN_PATTERNS: readonly PatternEntry[] = [
       '**Alice** hello world',
     ],
     source_doc:
-      'wintermute meeting-ingestion pipeline reformat of Circleback transcripts (~/git/wintermute/workspace/skills/meeting-ingestion/SKILL.md)',
+      'OpenClaw meeting-ingestion pipeline reformat of Circleback transcripts (see your OpenClaw skills/meeting-ingestion/SKILL.md)',
   },
 
   {
