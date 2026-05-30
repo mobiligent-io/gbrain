@@ -1,8 +1,8 @@
 # TODOS
 
-## v0.41.30.0 content-relative staleness follow-ups (v0.42+)
+## v0.41.32.0 content-relative staleness follow-ups (v0.42+)
 
-Filed from the v0.41.30.0 wave (supersedes #1623 — commit-relative sync
+Filed from the v0.41.32.0 wave (supersedes #1623 — commit-relative sync
 staleness). The wave fixes the LOCAL doctor/sources false-SEVERE and the
 REMOTE surfaces via a durable `sources.newest_content_at` column. Two gaps
 were deliberately scoped out (CM2 + the remote post-sync-divergence residual).
@@ -26,13 +26,20 @@ were deliberately scoped out (CM2 + the remote post-sync-divergence residual).
     cron doctor.
   - **Context:** the helper already exists — `newestCommitMs(localPath)` in
     `src/core/source-health.ts`. The phase just calls it per source and UPDATEs
-    the column. See the v0.41.30.0 plan at
+    the column. See the v0.41.32.0 plan at
     `~/.claude/plans/system-instruction-you-are-working-vivid-gizmo.md`.
   - **Also note:** `checkCycleFreshness` was deliberately left on wall-clock in
-    v0.41.30.0 (CM2 — it compares `last_full_cycle_at` via `listAllSources`, a
+    v0.41.32.0 (CM2 — it compares `last_full_cycle_at` via `listAllSources`, a
     different axis from sync staleness). Content-relativizing it (a source whose
     newest commit predates its last full cycle doesn't need re-cycling) is a
     natural companion to this probe phase. Priority: P3.
+## brainstorm/lsd --save source-awareness (v0.42+)
+
+Filed from the `--save` dual-sink hardening wave (route through the canonical
+ingestion path: `importFromContent({noEmbed:true})` + the shared
+`writePageThrough` helper extracted from `put_page`).
+
+- [ ] **v0.42+: make `gbrain brainstorm/lsd --save` source-aware.** Today the save path always writes to `source='default'` — `persistSavedIdea` (`src/commands/brainstorm.ts`) hardcodes `sourceId ?? 'default'`, and there is no `--save`-side `--source` flag. Both sinks stay consistent at default (no live bug), but on a multi-source brain a generated idea can't be filed to a non-default source. **What:** add a `--source <id>` option to brainstorm/lsd, resolve it via `resolveSourceWithTier`, and thread `sourceId` into `persistSavedIdea` → `importFromContent({sourceId})` + `writePageThrough({sourceId})`. **Why:** complete the multi-source story for generated ideas; the disk layout already handles it. **Context:** `writePageThrough` and `resolvePageFilePath` already take `sourceId` and emit `.sources/<id>/<slug>.md` for non-default sources, and `importFromContent` already accepts `sourceId` — so the only missing piece is the CLI flag + threading. `runBrainstorm` (orchestrator) already accepts `sourceId` for the close/far READ side. **Depends on:** nothing; purely additive. Priority: P3 (default-source is the common case).
 
 ## v0.41.29.0 orphan source-scoping follow-ups (v0.42+)
 
