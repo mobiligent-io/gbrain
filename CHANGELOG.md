@@ -2,6 +2,24 @@
 
 All notable changes to GBrain will be documented in this file.
 
+## [0.42.23.0] - 2026-06-03
+
+**`gbrain jobs work` and `gbrain jobs supervisor` take a `--nice <n>` flag that lowers the background job tree's CPU scheduling priority without cutting concurrency.** When the Minions worker pool runs at full width (sync, embed, extract, subagent fans), it can drive a machine's load average high enough to starve your interactive shell. Dropping concurrency throws away throughput. Niceness is the right lever: keep full concurrency, run at low priority, and the work finishes just as fast when the box is idle while yielding politely when it's busy. In the real incident that drove this, reniceing the tree took load from ~7 to ~3 with no measurable throughput loss.
+
+### What changed
+
+- **`--nice <n>` on `gbrain jobs work` and `gbrain jobs supervisor`** (POSIX `-20`..`19`; positive = nicer/lower priority). Also reads `GBRAIN_NICE` (the flag wins over the env var).
+- **Propagates down the whole tree.** The supervisor renices itself and passes `--nice` to the worker it spawns; OS niceness inherits to the worker's own children (shell jobs, subagents) automatically.
+- **Effective niceness is observable.** `gbrain jobs stats` and `gbrain jobs supervisor status --json` report the live worker + supervisor niceness, and a new `supervisor_niceness` check in `gbrain doctor` surfaces it as structured data — warning when what you asked for isn't what's running (negative nice without privilege, or an OS `RLIMIT_NICE` clamp).
+
+## To take advantage of v0.42.23.0
+
+`gbrain upgrade`, then start your worker or supervisor with `--nice 10` (or set `GBRAIN_NICE=10`). Confirm with `gbrain jobs stats` or `gbrain doctor` — both report the effective value, and `ps -o ni` will agree. Positive values need no privilege; negative values (raising priority) need root. This is distinct from the concurrency / inflight cap and composes with it: `--nice` tunes *priority*, concurrency tunes *width*.
+
+### For contributors
+
+New `src/core/minions/niceness.ts` (`applyNiceness` re-reads the effective value in both the success and failure paths, so a denied renice records the real inherited value, not null), `worker-registry.ts` (live workers self-register under `gbrainPath('workers')`, brain-isolated, with `ESRCH`/`EPERM`-aware pruning and a pid-reuse start-time guard), and `supervisor-pid.ts` (shared PID-file reader, dedupes the status/doctor/stats copies). `buildWorkerArgs` was extracted from the supervisor for unit testing. Eng review + Codex outside-voice both cleared the plan; Codex caught the detached-supervisor renice-ordering bug and the `parseInt("3.5")` gap. Closes #1815.
+
 ## [0.42.19.0] - 2026-06-02
 
 **`gbrain skillopt --write-capture` rollouts now get full tool schemas, closing the last gap in the AI SDK v6 tool-loop fix.** The v6 fix that got agent loops working again on non-Anthropic providers (DeepSeek, Qwen, Groq, local models) shipped in v0.42.11.0 — but it fixed only one of the two places skillopt builds tool definitions. The `--write-capture` path (the virtual put_page/submit_job/file_upload registry the optimizer uses to test write-flavored skills) still handed the model a stripped-down schema with `enum`, `default`, and `items` dropped, so the optimizer couldn't see a tool's allowed values and proposed invalid calls. Both builders now use the same shared mapper.
