@@ -250,6 +250,20 @@ export function justUpgradedPath(): string {
   return gbrainPath('just-upgraded-from');
 }
 
+/**
+ * Record the version we just upgraded FROM, so the next `gbrain` invocation's
+ * startup hook can print the one-time `JUST_UPGRADED <from> <to>` confirmation
+ * and then delete the breadcrumb. Best-effort: a failed write just means no
+ * confirmation line. Atomic so a concurrent read never sees a torn file.
+ */
+export function writeJustUpgraded(fromVersion: string): void {
+  try {
+    atomicWrite(justUpgradedPath(), fromVersion + '\n');
+  } catch {
+    /* best-effort confirmation */
+  }
+}
+
 /** Directory for the self-upgrade + refresh single-flight locks. */
 export function locksDir(): string {
   return gbrainPath('.locks');

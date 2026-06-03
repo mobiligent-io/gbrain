@@ -230,6 +230,17 @@ describe('cache', () => {
   });
 });
 
+describe('writeJustUpgraded', () => {
+  test('writes the from-version breadcrumb the CLI startup hook reads', async () => {
+    await withTmpHome(async () => {
+      const { writeJustUpgraded, justUpgradedPath } = await import('../src/core/self-upgrade.ts');
+      const { readFileSync } = await import('node:fs');
+      writeJustUpgraded('0.42.0');
+      expect(readFileSync(justUpgradedPath(), 'utf8').trim()).toBe('0.42.0');
+    });
+  });
+});
+
 describe('reconcileBreadcrumb', () => {
   test('no breadcrumb → no transition', () => {
     expect(reconcileBreadcrumb(undefined, '0.42.0').transition).toBeNull();

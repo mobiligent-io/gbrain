@@ -104,6 +104,21 @@ export async function runUpgrade(args: string[]) {
     // Save old version for post-upgrade migration detection
     saveUpgradeState(oldVersion, newVersion);
 
+    // Self-upgrade breadcrumb + cache reset (covers both the full and
+    // --swap-only paths, so the autopilot silent channel benefits too):
+    //   - write just-upgraded-from so the next invocation's startup hook prints
+    //     the one-time JUST_UPGRADED confirmation;
+    //   - clear the update-check cache + snooze so a now-stale "upgrade
+    //     available" marker doesn't keep nudging after we've already applied it.
+    try {
+      const su = await import('../core/self-upgrade.ts');
+      su.writeJustUpgraded(oldVersion);
+      su.clearUpdateCache();
+      su.clearSnooze();
+    } catch {
+      /* best-effort: never block the upgrade on confirmation bookkeeping */
+    }
+
     // --swap-only stops here: the swap is done + smoke-verified, but the
     // (potentially 30-min) post-upgrade is deferred to the next launch so the
     // autopilot silent channel can swap + relaunch without freezing its tick.
