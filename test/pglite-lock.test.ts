@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { acquireLock, releaseLock, type LockHandle } from '../src/core/pglite-lock';
+import { withEnv } from './helpers/with-env.ts';
 
 const TEST_DIR = join(tmpdir(), 'gbrain-lock-test-' + process.pid);
 
@@ -143,18 +144,14 @@ describe('pglite-lock #2058 heartbeat + steal-grace', () => {
   });
 
   test('GBRAIN_PGLITE_LOCK_STEAL_GRACE_SECONDS tunes the grace window', async () => {
-    const prev = process.env.GBRAIN_PGLITE_LOCK_STEAL_GRACE_SECONDS;
-    process.env.GBRAIN_PGLITE_LOCK_STEAL_GRACE_SECONDS = '5'; // 5s grace
-    try {
+    // withEnv keeps the process-global mutation isolated across shard files.
+    await withEnv({ GBRAIN_PGLITE_LOCK_STEAL_GRACE_SECONDS: '5' }, async () => {
       // Refreshed 30s ago — fresh under the 600s default, STALE under 5s.
       writeHolder({ pid: process.pid, acquiredAgoMs: 60_000, refreshedAgoMs: 30_000 });
       const lock = await acquireLock(TEST_DIR, { timeoutMs: 2000 });
       expect(lock.acquired).toBe(true);
       await releaseLock(lock);
-    } finally {
-      if (prev === undefined) delete process.env.GBRAIN_PGLITE_LOCK_STEAL_GRACE_SECONDS;
-      else process.env.GBRAIN_PGLITE_LOCK_STEAL_GRACE_SECONDS = prev;
-    }
+    });
   });
 
   test('[REGRESSION] releaseLock does NOT remove a lock that was stolen + re-acquired by another process', async () => {
