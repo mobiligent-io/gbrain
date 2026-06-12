@@ -12,14 +12,17 @@
  * only force-exits after the drain timed out, NOT unconditionally for
  * every non-serve command.
  *
- * Daemon list: `serve` (stdio + HTTP) and `watch` (stdin-follow push
- * transport, v0.43 #2095 — interactive TTY sessions stay alive until
- * Ctrl-C; its piped/EOF path exits via its own drain-then-exit lifecycle,
- * not this gate). If a future long-running command is added (e.g.
- * `gbrain daemon`), add it here.
+ * Daemon list is just `serve` (stdio + HTTP): it RETURNS from its handler
+ * while the event loop carries the server. Every other long-runner —
+ * `jobs work`, `autopilot`, and v0.43's `gbrain watch` (#2095) — BLOCKS
+ * inside its awaited handler until done (watch blocks in the stdin
+ * iteration: interactive stays alive until Ctrl-C/Ctrl-D, piped input ends
+ * at EOF), so when main() resolves the work is over and the deliberate
+ * flush-exit is correct. Add a command here ONLY if it returns early and
+ * leaves the event loop holding the daemon.
  */
 
-const DAEMON_COMMANDS: ReadonlySet<string> = new Set(['serve', 'watch']);
+const DAEMON_COMMANDS: ReadonlySet<string> = new Set(['serve']);
 
 export function shouldForceExitAfterMain(
   argv: string[] = process.argv.slice(2),
