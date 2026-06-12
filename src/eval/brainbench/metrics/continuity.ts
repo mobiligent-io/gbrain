@@ -59,8 +59,12 @@ export async function factKeywordProbe(
   sourceId: string,
   keywords: string[],
 ): Promise<boolean> {
-  const conds = keywords.map((_, i) => `fact ILIKE $${i + 2}`).join(' AND ');
-  const params = [sourceId, ...keywords.map((kw) => `%${kw}%`)];
+  // Escape ILIKE metacharacters so a gold keyword containing % or _ can't
+  // silently broaden the match into a false pass (review finding — scoring
+  // integrity, not injection: everything is parameterized).
+  const escapeLike = (s: string) => s.replace(/[\\%_]/g, (m) => `\\${m}`);
+  const conds = keywords.map((_, i) => `fact ILIKE $${i + 2} ESCAPE '\\'`).join(' AND ');
+  const params = [sourceId, ...keywords.map((kw) => `%${escapeLike(kw)}%`)];
   const rows = await engine.executeRaw<{ one: number }>(
     `SELECT 1 AS one FROM facts
       WHERE source_id = $1 AND expired_at IS NULL AND ${conds}

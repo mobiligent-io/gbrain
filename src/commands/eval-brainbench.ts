@@ -16,7 +16,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { flushThenExit } from '../core/cli-force-exit.ts';
 import { cliOptsToProgressOptions, getCliOptions } from '../core/cli-options.ts';
@@ -26,6 +26,7 @@ import { isAvailable } from '../core/ai/gateway.ts';
 import { FixtureValidationError, loadCorpus } from '../eval/brainbench/fixtures.ts';
 import { runBrainBench } from '../eval/brainbench/harness.ts';
 import {
+  cellKey,
   compareBaselines,
   parseBaseline,
   renderScoreboardMarkdown,
@@ -417,7 +418,7 @@ export async function runBrainBenchCore(): Promise<{
     }
     const cells: Record<string, Record<string, number>> = {};
     for (const c of run.cells) {
-      cells[`${c.harness}/${c.suite}`] = { ...c.metrics, gold_failed: c.gold_failed, gold_total: c.gold_total };
+      cells[cellKey(c)] = { ...c.metrics, gold_failed: c.gold_failed, gold_total: c.gold_total };
     }
     return { status: 'completed', fixtures_hash: corpus.fixtures_hash, cells };
   } catch (err) {
@@ -426,4 +427,4 @@ export async function runBrainBenchCore(): Promise<{
 }
 
 /** Test hook: everything above process.exit, without exiting. */
-export const _internal = { parseArgs, DEFAULT_BASELINE_PATH: join(DEFAULT_BASELINE_PATH) };
+export const _internal = { parseArgs, DEFAULT_BASELINE_PATH };

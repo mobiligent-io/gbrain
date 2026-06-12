@@ -118,6 +118,18 @@ describe('validator rejection classes', () => {
     expect(() => validateGold('g.json', badGold, fixture)).toThrow(/no matching fixture turn/);
   });
 
+  test('retrieval-suite gold with should_retrieve=true and empty gold_slugs rejected (unpassable item)', () => {
+    const fixture = validateFixture('f.json', structuredClone(BASE_FIXTURE));
+    const badGold = structuredClone(BASE_GOLD) as { fixture_id: string; turns: Record<string, Record<string, unknown>> };
+    badGold.turns['1'] = { should_retrieve: true, gold_slugs: [] };
+    expect(() => validateGold('g.json', badGold, fixture)).toThrow(/must be non-empty/);
+    delete badGold.turns['1'].gold_slugs;
+    badGold.turns['1'].gold_facts = [
+      { gist: 'x', fact: 'y', entity_slug: null, match_keywords: ['k'] },
+    ];
+    expect(() => validateGold('g.json', badGold, fixture)).toThrow(/must be non-empty/);
+  });
+
   test('gold_facts without match_keywords rejected', () => {
     const fixture = validateFixture('f.json', structuredClone(BASE_FIXTURE));
     const badGold = structuredClone(BASE_GOLD) as { turns: Record<string, Record<string, unknown>> };

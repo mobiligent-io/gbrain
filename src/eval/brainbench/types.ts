@@ -113,6 +113,14 @@ export interface PublicTurn {
   ts?: string;
 }
 
+/**
+ * The canonical 4-decimal rounding (decision 10 — baseline diff-stability).
+ * ONE implementation; scoreboard + harness import it (review DRY finding).
+ */
+export function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}
+
 export function toPublicTurn(turn: FixtureTurn): PublicTurn {
   const out: PublicTurn = { turn_id: turn.turn_id, role: turn.role, text: turn.text };
   if (turn.ts !== undefined) out.ts = turn.ts;

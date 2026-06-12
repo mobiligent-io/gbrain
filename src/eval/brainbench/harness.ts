@@ -9,14 +9,20 @@
  * reset. A sentinel-slug test pins that sharing leaks nothing.
  *
  * Continuity pairs (writer fixture → production write-back → reader fixture)
- * run per ordered (writerHarness ≠ readerHarness) pair on a shared brain;
- * scores land on the READER's cell. With a single requested harness the
- * writer==reader diagonal runs instead (disclosed, not the headline shape).
+ * run on a shared brain; scores land on the READER's cell. The write path is
+ * gbrain's pipeline — harness-INDEPENDENT in v1 (disclosed in
+ * docs/eval/BRAINBENCH.md) — so each pair preps ONCE (reset + seed +
+ * write-back) and every requested harness replays the read-only reader against
+ * that shared state. The per-(writer×reader)-ordering loop this replaces
+ * rebuilt byte-identical brains 6x per pair and replayed a writer whose state
+ * could not outlive the call (review findings: dead work, identical scores).
+ * The writer axis activates when harness-specific write paths actually land.
  *
  * Sealed gold: adapters only ever receive AdapterFixtureView + PublicTurn
  * (toPublicTurn picks fields; gold never crosses).
  */
 
+import { BudgetTracker } from '../../core/budget/budget-tracker.ts';
 import { createBenchmarkBrain, resetTables } from '../longmemeval/harness.ts';
 import type { PGLiteEngine } from '../../core/pglite-engine.ts';
 import { ClaudeCodeAdapter } from './adapters/claude-code.ts';
@@ -28,6 +34,7 @@ import { runWriteBack, type WriteBackScore } from './metrics/write-back.ts';
 import { scoreContinuityPair } from './metrics/continuity.ts';
 import { SeedError, seedBrain, type SeedOutcome } from './seed.ts';
 import {
+  round4,
   toPublicTurn,
   type AdapterFixtureView,
   type BrainBenchSuite,
@@ -199,6 +206,12 @@ export async function runBrainBench(
   };
   const continuityByReader = new Map<HarnessName, ContinuityAgg>();
 
+  // RUN-scoped --llm budget (review finding: a per-invocation cap would
+  // multiply by fixture count — ~$550 worst case on the committed corpus).
+  const llmTracker = opts.llm
+    ? new BudgetTracker({ maxCostUsd: opts.budgetUsd ?? 5, label: 'brainbench:llm' })
+    : undefined;
+
   const engine = await createBenchmarkBrain();
   let fixturesRun = 0;
   try {
@@ -234,23 +247,13 @@ export async function runBrainBench(
         const score = await runWriteBack(engine, lf.fixture, lf.gold, {
           llm: opts.llm,
           budgetUsd: opts.budgetUsd,
+          budgetTracker: llmTracker,
         });
         accumulateWriteBack(writeBackAgg, id, score);
       }
     }
 
-    // ---- continuity pairs ----
-    const pairHarnesses: Array<[HarnessName, HarnessName]> = [];
-    if (opts.harnesses.length === 1) {
-      pairHarnesses.push([opts.harnesses[0], opts.harnesses[0]]);
-    } else {
-      for (const w of opts.harnesses) {
-        for (const r of opts.harnesses) {
-          if (w !== r) pairHarnesses.push([w, r]);
-        }
-      }
-    }
-
+    // ---- continuity pairs: ONE prep per pair, every harness reads it ----
     for (const [pairId, pair] of pairFixtures) {
       if (!pair.writer || !pair.reader) continue; // loader validates; belt+suspenders
       const writer = pair.writer;
@@ -258,32 +261,31 @@ export async function runBrainBench(
       const decisions = reader.gold.continuity?.decisions ?? [];
       if (!decisions.length) continue;
 
-      for (const [writerHarness, readerHarness] of pairHarnesses) {
-        progress(`continuity ${pairId} ${writerHarness}→${readerHarness}`);
-        await resetTables(engine);
-        let writerSeed: SeedOutcome;
-        let readerSeed: SeedOutcome;
-        try {
-          writerSeed = await seedBrain(engine, writer.fixture);
-          readerSeed = await seedBrain(engine, reader.fixture);
-        } catch (err) {
-          if (err instanceof SeedError) {
-            seedFailures.push({ fixture_id: `${pairId} (${writerHarness}→${readerHarness})`, error: err.message });
-            continue;
-          }
-          throw err;
+      progress(`continuity ${pairId}`);
+      await resetTables(engine);
+      let readerSeed: SeedOutcome;
+      try {
+        await seedBrain(engine, writer.fixture);
+        readerSeed = await seedBrain(engine, reader.fixture);
+      } catch (err) {
+        if (err instanceof SeedError) {
+          seedFailures.push({ fixture_id: pairId, error: err.message });
+          continue;
         }
+        throw err;
+      }
+      fixturesRun += 2;
 
-        // Writer conversation replays through ITS harness (suppression state
-        // realistic), then its decisions persist via the production pipeline.
-        const writerAdapter = makeAdapter(writerHarness);
-        await replayFixture(engine, writerAdapter, writer, writerSeed, []);
-        await runWriteBack(engine, writer.fixture, writer.gold, {
-          llm: opts.llm,
-          budgetUsd: opts.budgetUsd,
-        });
+      // The writer's decisions persist through the PRODUCTION pipeline —
+      // harness-independent in v1, so it runs once per pair.
+      await runWriteBack(engine, writer.fixture, writer.gold, {
+        llm: opts.llm,
+        budgetUsd: opts.budgetUsd,
+        budgetTracker: llmTracker,
+      });
 
-        // Reader replays on the SAME brain through a different harness.
+      // Every requested harness reads the SAME persisted state (read-only).
+      for (const readerHarness of opts.harnesses) {
         const readerAdapter = makeAdapter(readerHarness);
         const readerRows = await replayFixture(engine, readerAdapter, reader, readerSeed, ['continuity']);
         turnRows.push(...readerRows);
@@ -297,10 +299,9 @@ export async function runBrainBench(
         agg.gold_total += score.gold_total;
         agg.gold_failed += score.gold_failed;
         if (!agg.fixtures.includes(reader.fixture.fixture_id)) agg.fixtures.push(reader.fixture.fixture_id);
-        agg.failed_items.push(...score.failed_items.map((f) => `${f} [${writerHarness}→${readerHarness}]`));
+        agg.failed_items.push(...score.failed_items.map((f) => `${f} [reader: ${readerHarness}]`));
         continuityByReader.set(readerHarness, agg);
       }
-      fixturesRun += 2;
     }
   } finally {
     await engine.disconnect();
@@ -310,7 +311,7 @@ export async function runBrainBench(
   const cells: SuiteMetrics[] = [];
   for (const harness of opts.harnesses) {
     for (const suite of opts.suites) {
-      const cell = assembleCell(harness, suite, turnRows, writeBackAgg, continuityByReader);
+      const cell = assembleCell(harness, suite, turnRows, writeBackAgg, continuityByReader, opts.llm);
       if (cell) cells.push(cell);
     }
   }
@@ -324,12 +325,9 @@ function accumulateWriteBack(agg: WriteBackAgg, fixtureId: string, score: WriteB
   agg.survived += score.survived;
   agg.provenance_ok += score.provenance_ok;
   agg.stored_rows += score.stored_rows;
+  agg.matched_any_gold += score.matched_any_gold;
   agg.fixtures.push(fixtureId);
   agg.failed_items.push(...score.failed_items);
-}
-
-function round4(n: number): number {
-  return Math.round(n * 10000) / 10000;
 }
 
 function assembleCell(
@@ -338,24 +336,36 @@ function assembleCell(
   turnRows: TurnRow[],
   writeBackAgg: WriteBackAgg,
   continuityByReader: Map<HarnessName, ContinuityAgg>,
+  llm: boolean,
 ): SuiteMetrics | null {
   if (suite === 'write-back') {
     if (writeBackAgg.fixtures.length === 0) return null;
     // The write path is gbrain's pipeline — identical for every harness seam
     // in v1, so each harness cell carries the same (once-computed) numbers.
     // When harness-specific write paths land, this is where they diverge.
+    const metrics: Record<string, number> = {
+      write_back_fidelity: round4(
+        writeBackAgg.gold_total > 0 ? writeBackAgg.survived / writeBackAgg.gold_total : 1,
+      ),
+      provenance_accuracy: round4(
+        writeBackAgg.survived > 0 ? writeBackAgg.provenance_ok / writeBackAgg.survived : 1,
+      ),
+    };
+    if (llm) {
+      // Σ-aggregated extraction quality (review finding: per-fixture values
+      // were computed but never reached any cell).
+      metrics.extraction_recall = round4(
+        writeBackAgg.gold_total > 0 ? writeBackAgg.survived / writeBackAgg.gold_total : 1,
+      );
+      metrics.extraction_precision = round4(
+        writeBackAgg.stored_rows > 0 ? writeBackAgg.matched_any_gold / writeBackAgg.stored_rows : 1,
+      );
+    }
     return {
       suite, harness, seam: SEAM[harness],
       gold_total: writeBackAgg.gold_total,
       gold_failed: writeBackAgg.gold_failed,
-      metrics: {
-        write_back_fidelity: round4(
-          writeBackAgg.gold_total > 0 ? writeBackAgg.survived / writeBackAgg.gold_total : 1,
-        ),
-        provenance_accuracy: round4(
-          writeBackAgg.survived > 0 ? writeBackAgg.provenance_ok / writeBackAgg.survived : 1,
-        ),
-      },
+      metrics,
       fixtures: [...writeBackAgg.fixtures],
     };
   }

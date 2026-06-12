@@ -115,7 +115,7 @@ if [ -d "$BB_DIR/fixtures" ]; then
       echo "  VIOLATION: out-of-range year in $match (fixtures use 2024-2026)"
       VIOLATIONS=$((VIOLATIONS + 1))
     fi
-  done < <(grep -rEn '\b(201[0-9]|202[0-3]|202[7-9]|20[3-9][0-9])\b' "$BB_DIR/fixtures" --include='*.json' 2>/dev/null || true)
+  done < <(grep -rEn '\b(201[0-9]|202[0-3]|202[7-9]|20[3-9][0-9])\b' "$BB_DIR/fixtures" "$BB_DIR/gold" --include='*.json' 2>/dev/null || true)
 fi
 
 if [ "$VIOLATIONS" -gt 0 ]; then

@@ -197,16 +197,21 @@ export function validateGold(file: string, raw: unknown, fixture: BrainBenchFixt
     if (typeof tg.should_retrieve !== 'boolean') {
       throw new FixtureValidationError(file, `gold.turns["${key}"].should_retrieve must be boolean`);
     }
-    if (tg.should_retrieve && !isStringArray(tg.gold_slugs)) {
-      // gold_slugs may legitimately be absent on write-back-only turns; require
-      // it only when the turn participates in retrieval suites.
+    {
+      // On a retrieval-suite fixture, should_retrieve=true REQUIRES non-empty
+      // gold_slugs — a slug-less retrieve-turn is a guaranteed miss no harness
+      // can pass (review finding: it silently poisons the failure rate).
       const retrievalSuites = fixture.suites.some(
         (s: BrainBenchSuite) => s === 'know-to-ask' || s === 'push',
       );
-      if (retrievalSuites && !tg.gold_facts) {
+      if (
+        retrievalSuites &&
+        tg.should_retrieve &&
+        (!isStringArray(tg.gold_slugs) || tg.gold_slugs.length === 0)
+      ) {
         throw new FixtureValidationError(
           file,
-          `gold.turns["${key}"].gold_slugs required when should_retrieve=true on a retrieval-suite fixture`,
+          `gold.turns["${key}"].gold_slugs must be non-empty when should_retrieve=true on a retrieval-suite fixture (a slug-less retrieve turn is an unpassable gold item)`,
         );
       }
     }
@@ -288,9 +293,16 @@ export async function loadCorpus(fixtureDir: string, goldDir: string): Promise<L
   const fixtures: LoadedFixture[] = [];
   const goldByFixtureId = new Map<string, { raw: unknown; file: string }>();
 
-  for (const gf of goldFiles) {
-    const path = join(goldDir, gf);
-    const content = await readFile(path, 'utf-8');
+  // Parallel I/O; hashing stays in sorted order over the resolved array
+  // (determinism needs ordered hash.update, not serial reads).
+  const goldContents = await Promise.all(goldFiles.map((gf) => readFile(join(goldDir, gf), 'utf-8')));
+  const fixtureContents = await Promise.all(
+    fixtureFiles.map((ff) => readFile(join(fixtureDir, ff), 'utf-8')),
+  );
+
+  for (let i = 0; i < goldFiles.length; i++) {
+    const gf = goldFiles[i];
+    const content = goldContents[i];
     hash.update(`gold/${gf}\n`);
     hash.update(content);
     let parsed: unknown;
@@ -306,9 +318,10 @@ export async function loadCorpus(fixtureDir: string, goldDir: string): Promise<L
   }
 
   const seenIds = new Set<string>();
-  for (const ff of fixtureFiles) {
+  for (let i = 0; i < fixtureFiles.length; i++) {
+    const ff = fixtureFiles[i];
     const path = join(fixtureDir, ff);
-    const content = await readFile(path, 'utf-8');
+    const content = fixtureContents[i];
     hash.update(`fixtures/${ff}\n`);
     hash.update(content);
     let parsed: unknown;

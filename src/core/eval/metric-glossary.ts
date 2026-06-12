@@ -184,8 +184,8 @@ export const METRIC_GLOSSARY: Readonly<Record<string, Readonly<MetricGlossEntry>
   }),
   'continuity_rate': Object.freeze({
     industry_term: 'Cross-session continuity rate (BrainBench)',
-    eli10: 'A decision is recorded in one harness\'s session; a DIFFERENT harness asks about it later on the same brain. What fraction of those decision probes were recalled — by pointer injection or stored-fact lookup? This is the continuity-that-survives-the-harness-hop moat, measured.',
-    range: '0..1, higher is better. Headline = mean over writer→reader pairs with different harnesses.',
+    eli10: 'A decision is recorded in one session and persisted through the production write path; a different harness asks about it later on the same brain. What fraction of those decision probes were recalled — by pointer injection or stored-fact lookup? This is the continuity-that-survives-the-harness-hop moat, measured.',
+    range: '0..1, higher is better. Scored per reader harness (the v1 write path is harness-independent, disclosed in docs/eval/BRAINBENCH.md).',
   }),
   'source_isolation_violations': Object.freeze({
     industry_term: 'Source-isolation violations (BrainBench)',

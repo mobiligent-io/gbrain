@@ -17,16 +17,26 @@ set -euo pipefail
 
 BASELINE_PATH="evals/brainbench/baselines/main.json"
 MAIN_REF="${BRAINBENCH_MAIN_REF:-origin/master}"
-OUT="${BRAINBENCH_OUT:-/tmp/brainbench-result.json}"
+# mktemp default (review finding): a fixed world-writable /tmp path is a
+# symlink-planting target on shared hosts. CI overrides via BRAINBENCH_OUT.
+OUT="${BRAINBENCH_OUT:-$(mktemp /tmp/brainbench-result-XXXXXX.json)}"
 MAIN_BASELINE="$(mktemp /tmp/brainbench-main-baseline-XXXXXX.json)"
 trap 'rm -f "$MAIN_BASELINE"' EXIT
+
+# Fail HARD when the ref itself is broken — only a genuinely-absent baseline
+# may take the ungated first-landing path (review finding: an unfetched ref
+# or typo'd BRAINBENCH_MAIN_REF must not silently disable the gate).
+if ! git rev-parse --verify --quiet "${MAIN_REF}^{commit}" > /dev/null; then
+  echo "[brainbench-gate] ERROR: ref ${MAIN_REF} does not resolve — fetch it or fix BRAINBENCH_MAIN_REF" >&2
+  exit 2
+fi
 
 if git show "${MAIN_REF}:${BASELINE_PATH}" > "$MAIN_BASELINE" 2>/dev/null; then
   echo "[brainbench-gate] comparing against ${MAIN_REF}:${BASELINE_PATH}"
   bun src/cli.ts eval brainbench --compare "$MAIN_BASELINE" --out "$OUT"
 else
-  # First landing: main has no baseline yet. Run without a gate so the PR
-  # that introduces BrainBench can commit the initial baseline.
+  # First landing: the ref exists but carries no baseline yet. Run without a
+  # gate so the PR that introduces BrainBench can commit the initial baseline.
   echo "[brainbench-gate] no baseline on ${MAIN_REF} yet — running ungated (initial-landing path)"
   bun src/cli.ts eval brainbench --out "$OUT"
 fi

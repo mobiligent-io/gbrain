@@ -744,7 +744,7 @@ async function processPage(
     const text = renderSegmentForExtraction(page.title || page.slug, seg);
     const sessionId = `${PER_SEGMENT_SOURCE_PREFIX}:${page.slug}`;
 
-    let extracted: Awaited<ReturnType<typeof extractFactsFromTurn>> = [];
+    let extracted: ExtractedFact[] = [];
     try {
       extracted = await state.extractor({
         turnText: text,

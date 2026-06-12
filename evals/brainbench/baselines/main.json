@@ -68,7 +68,7 @@
   },
   "counts": {
     "claude-code/continuity": {
-      "gold_total": 24,
+      "gold_total": 12,
       "gold_failed": 0
     },
     "claude-code/know-to-ask": {
@@ -84,7 +84,7 @@
       "gold_failed": 0
     },
     "codex/continuity": {
-      "gold_total": 24,
+      "gold_total": 12,
       "gold_failed": 0
     },
     "codex/know-to-ask": {
@@ -100,7 +100,7 @@
       "gold_failed": 0
     },
     "openclaw/continuity": {
-      "gold_total": 24,
+      "gold_total": 12,
       "gold_failed": 0
     },
     "openclaw/know-to-ask": {

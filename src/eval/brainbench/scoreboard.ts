@@ -18,11 +18,12 @@
  * decimals, keys sorted, receipts excluded (decision 10).
  */
 
-import type {
-  BrainBenchBaseline,
-  BrainBenchResult,
-  CompareOutcome,
-  SuiteMetrics,
+import {
+  round4,
+  type BrainBenchBaseline,
+  type BrainBenchResult,
+  type CompareOutcome,
+  type SuiteMetrics,
 } from './types.ts';
 
 /** Gated metrics + their good direction. Anything absent is diagnostic-only. */
@@ -41,11 +42,8 @@ export const GATED_METRICS: Readonly<Record<string, 'lower' | 'higher'>> = {
 
 const BASELINE_SCHEMA_VERSION = 1;
 
-function round4(n: number): number {
-  return Math.round(n * 10000) / 10000;
-}
-
-function cellKey(c: SuiteMetrics): string {
+/** The canonical `${harness}/${suite}` cell key — baseline + run-all records share it. */
+export function cellKey(c: Pick<SuiteMetrics, 'harness' | 'suite'>): string {
   return `${c.harness}/${c.suite}`;
 }
 

@@ -21,6 +21,7 @@
  *                               {source, source_session, source_markdown_slug}
  */
 
+import type { BudgetTracker } from '../../../core/budget/budget-tracker.ts';
 import type { ExtractInput, ExtractedFact } from '../../../core/facts/extract.ts';
 import {
   PER_SEGMENT_SOURCE_PREFIX,
@@ -40,6 +41,8 @@ export interface WriteBackScore {
   provenance_ok: number;
   /** Total non-audit rows stored (extraction_precision denominator in --llm mode). */
   stored_rows: number;
+  /** Stored rows matching ANY gold probe (extraction_precision numerator). */
+  matched_any_gold: number;
   metrics: Record<string, number>;
   failed_items: string[];
 }
@@ -133,7 +136,16 @@ export async function runWriteBack(
   engine: PGLiteEngine,
   fixture: BrainBenchFixture,
   gold: FixtureGold,
-  opts: { llm: boolean; budgetUsd?: number },
+  opts: {
+    llm: boolean;
+    budgetUsd?: number;
+    /**
+     * RUN-scOPED tracker for --llm mode (review finding: a per-invocation cap
+     * would multiply by fixture count). The harness owns one tracker for the
+     * whole run and threads it here; the pipeline uses it as-is.
+     */
+    budgetTracker?: BudgetTracker;
+  },
 ): Promise<WriteBackScore> {
   const sourceId = fixture.active_source ?? 'default';
   const slug = conversationSlug(fixture.fixture_id);
@@ -148,18 +160,25 @@ export async function runWriteBack(
     );
   }
 
-  await runExtractConversationFactsCore(engine, {
+  const extractResult = await runExtractConversationFactsCore(engine, {
     sourceId,
     slug,
     types: ['conversation'],
     overrideDisabled: true,
     sleepMs: 0,
     // Deterministic CI mode injects the gold extractor; --llm runs the real
-    // one under the caller's budget cap (cost-guard pattern, decision 2).
+    // one under the RUN-scoped tracker (cost-guard pattern, decision 2).
     ...(opts.llm
-      ? { maxCostUsd: opts.budgetUsd }
+      ? { budgetTracker: opts.budgetTracker, maxCostUsd: opts.budgetUsd }
       : { extractor: makeGoldExtractor(fixture, gold) }),
   });
+  if (extractResult.budget_exhausted) {
+    // Partial extraction would silently corrupt every downstream score —
+    // abort the run loudly instead (CLI maps this to exit 2).
+    throw new Error(
+      `brainbench --llm budget exhausted during ${fixture.fixture_id} (spent ~$${(extractResult.spent_usd ?? 0).toFixed(2)}) — raise --budget-usd or drop --llm`,
+    );
+  }
 
   const stored = await engine.executeRaw<StoredFactRow>(
     `SELECT fact, entity_slug, source, source_session, source_markdown_slug
@@ -203,13 +222,14 @@ export async function runWriteBack(
     provenance_accuracy: survived > 0 ? provenanceOk / survived : 1,
   };
 
+  // Computed in both modes so the harness can aggregate; only SCORED as
+  // extraction metrics when the real extractor ran (--llm).
+  const matchedAnyGold = stored.filter((row) =>
+    goldItems.some(({ spec }) =>
+      spec.match_keywords.every((kw) => row.fact.toLowerCase().includes(kw.toLowerCase())),
+    ),
+  ).length;
   if (opts.llm) {
-    // Extraction quality vs gold, only meaningful when the real extractor ran.
-    const matchedAnyGold = stored.filter((row) =>
-      goldItems.some(({ spec }) =>
-        spec.match_keywords.every((kw) => row.fact.toLowerCase().includes(kw.toLowerCase())),
-      ),
-    ).length;
     metrics.extraction_recall = goldItems.length > 0 ? survived / goldItems.length : 1;
     metrics.extraction_precision = stored.length > 0 ? matchedAnyGold / stored.length : 1;
   }
@@ -222,6 +242,7 @@ export async function runWriteBack(
     survived,
     provenance_ok: provenanceOk,
     stored_rows: stored.length,
+    matched_any_gold: matchedAnyGold,
     metrics,
     failed_items: failed,
   };

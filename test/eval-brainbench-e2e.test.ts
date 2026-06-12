@@ -40,6 +40,15 @@ beforeAll(() => {
     cpSync(join(REPO, 'evals/brainbench/fixtures', `${id}.fixture.json`), join(fixtures, `${id}.fixture.json`));
     cpSync(join(REPO, 'evals/brainbench/gold', `${id}.gold.json`), join(gold, `${id}.gold.json`));
   }
+  // Shared artifacts every consumer test depends on, built ONCE here so each
+  // test is self-sufficient under -t filters / sharding (review finding:
+  // order-dependent file production across describe blocks).
+  const r = run(['--fixtures', fixtures, '--gold', gold, '--update-baseline', join(root, 'base1.json')]);
+  if (r.exitCode !== 0) throw new Error(`beforeAll baseline build failed: ${r.stderr}`);
+  const doctored = JSON.parse(readFileSync(join(root, 'base1.json'), 'utf-8'));
+  const cellKey = Object.keys(doctored.counts).find((k) => doctored.counts[k].gold_total > 0)!;
+  doctored.counts[cellKey].gold_failed = -1; // pretends fewer failures than any run can match
+  writeFileSync(join(root, 'doctored.json'), JSON.stringify(doctored, null, 2));
 });
 
 describe('exit contract over a multi-brain run (PGLite exitCode-hijack guard)', () => {
@@ -56,11 +65,10 @@ describe('exit contract over a multi-brain run (PGLite exitCode-hijack guard)', 
   }, 30_000);
 
   test('--update-baseline is byte-deterministic across two runs (decision 10)', () => {
-    const b1 = join(root, 'base1.json');
     const b2 = join(root, 'base2.json');
-    expect(run(['--fixtures', fixtures, '--gold', gold, '--update-baseline', b1]).exitCode).toBe(0);
     expect(run(['--fixtures', fixtures, '--gold', gold, '--update-baseline', b2]).exitCode).toBe(0);
-    expect(readFileSync(b1, 'utf-8')).toBe(readFileSync(b2, 'utf-8'));
+    // base1.json was produced by an entirely separate run in beforeAll.
+    expect(readFileSync(b2, 'utf-8')).toBe(readFileSync(join(root, 'base1.json'), 'utf-8'));
   }, 60_000);
 
   test('--compare against own baseline: exit 0 PASS', () => {
@@ -71,14 +79,7 @@ describe('exit contract over a multi-brain run (PGLite exitCode-hijack guard)', 
   }, 30_000);
 
   test('doctored main baseline (pretends fewer failures): exit 1 REGRESSION with named breach', () => {
-    const doctored = JSON.parse(readFileSync(join(root, 'base1.json'), 'utf-8'));
-    const cellKey = Object.keys(doctored.counts).find((k) => doctored.counts[k].gold_total > 0)!;
-    doctored.counts[cellKey].gold_failed = Math.max(0, doctored.counts[cellKey].gold_failed - 1);
-    // also make the run's count strictly greater by raising the bar impossibly
-    doctored.counts[cellKey].gold_failed = -1 as never;
-    const path = join(root, 'doctored.json');
-    writeFileSync(path, JSON.stringify(doctored, null, 2));
-    const r = run(['--fixtures', fixtures, '--gold', gold, '--compare', path]);
+    const r = run(['--fixtures', fixtures, '--gold', gold, '--compare', join(root, 'doctored.json')]);
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain('## Gate: REGRESSION');
     expect(r.stdout).toContain('newly-failed');
@@ -239,10 +240,11 @@ describe('--json stdout completeness', () => {
 describe('--llm availability gate', () => {
   test('no config + no keys: exit 2 with an actionable message, before any run', () => {
     const bareHome = mkdtempSync(join(tmpdir(), 'bb-home-'));
-    const env = { ...process.env, HOME: bareHome } as Record<string, string>;
-    delete env.ANTHROPIC_API_KEY;
-    delete env.CLAUDE_API_KEY;
-    delete env.OPENAI_API_KEY;
+    // Minimal explicit env (review finding): spreading process.env and
+    // deleting a hardcoded key list leaks other provider keys (GOOGLE_*,
+    // per-recipe ${ID}_API_KEY) — on a dev machine that could flip the gate
+    // open and make REAL API calls from a test.
+    const env: Record<string, string> = { PATH: process.env.PATH ?? '', HOME: bareHome };
     const proc = Bun.spawnSync(
       ['bun', 'src/cli.ts', 'eval', 'brainbench', '--fixtures', fixtures, '--gold', gold, '--llm'],
       { cwd: REPO, env, stdout: 'pipe', stderr: 'pipe' },
@@ -273,13 +275,19 @@ describe('render-brainbench-delta.ts (the CI step-summary block)', () => {
 });
 
 describe('privacy guard violation branches (negative path)', () => {
-  test('a fixture with a real dollar amount + out-of-range year fails the scan', () => {
+  test('a fixture with a real dollar amount + out-of-range year fails the scan (gold dir scanned too)', () => {
     const dirty = mkdtempSync(join(tmpdir(), 'bb-privacy-'));
     mkdirSync(join(dirty, 'fixtures'), { recursive: true });
     mkdirSync(join(dirty, 'gold'), { recursive: true });
     writeFileSync(
       join(dirty, 'fixtures', 'leak.fixture.json'),
-      JSON.stringify({ turns: [{ text: 'They raised $50M back in 2019 for the series B' }] }),
+      JSON.stringify({ turns: [{ text: 'They raised $50M for the series B' }] }),
+    );
+    // The year violation lives in GOLD — pins that the year scan covers the
+    // gold dir as well (review finding: it previously scanned fixtures only).
+    writeFileSync(
+      join(dirty, 'gold', 'leak.gold.json'),
+      JSON.stringify({ fixture_id: 'leak', turns: { '1': { gold_facts: [{ fact: 'raised back in 2019' }] } } }),
     );
     const proc = Bun.spawnSync(['bash', 'scripts/check-synthetic-corpus-privacy.sh'], {
       cwd: REPO,
@@ -319,10 +327,11 @@ describe('run-all wiring (decision 16) — full corpus, in-process', () => {
     expect(core.status).toBe('completed');
     expect(Object.keys(core.cells ?? {}).length).toBe(12);
     expect(core.fixtures_hash).toBeDefined();
-    // committed baseline matches the committed corpus hash (drift guard)
-    if (existsSync('evals/brainbench/baselines/main.json')) {
-      const baseline = JSON.parse(readFileSync('evals/brainbench/baselines/main.json', 'utf-8'));
-      expect(baseline.fixtures_hash).toBe(core.fixtures_hash);
-    }
+    // Committed baseline matches the committed corpus hash (drift guard).
+    // UNCONDITIONAL (review finding): a conditional existsSync would turn a
+    // deleted baseline into a silent no-op instead of a failure.
+    expect(existsSync('evals/brainbench/baselines/main.json')).toBe(true);
+    const baseline = JSON.parse(readFileSync('evals/brainbench/baselines/main.json', 'utf-8'));
+    expect(baseline.fixtures_hash).toBe(core.fixtures_hash);
   }, 120_000);
 });

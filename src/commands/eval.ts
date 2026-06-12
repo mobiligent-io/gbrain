@@ -59,6 +59,7 @@ export async function runEvalCommand(engine: BrainEngine, args: string[]): Promi
     // command owns its exit codes (0 pass / 1 regression / 2 error).
     const { runEvalBrainBench } = await import('./eval-brainbench.ts');
     await runEvalBrainBench(args.slice(1));
+    return; // unreachable — runEvalBrainBench always exits — but keeps control flow explicit
   }
   if (sub === 'code-retrieval') {
     // v0.33.3 pre-w0 — code-retrieval baseline / gate harness. Needs a brain

@@ -132,6 +132,44 @@ describe('runWriteBack (deterministic, production pipeline)', () => {
     }
   });
 
+  test('--llm extraction metrics reach the harness CELLS (review finding: they were dropped in aggregation)', async () => {
+    __setChatTransportForTests(async (): Promise<ChatResult> => ({
+      text: JSON.stringify({
+        facts: [{
+          fact: 'Alice Example flagged the pricing model undercutting gross margin',
+          kind: 'belief',
+          entity: 'people/alice-example',
+          confidence: 1.0,
+          notability: 'high',
+        }],
+      }),
+      blocks: [],
+      stopReason: 'end',
+      usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
+      model: 'stub:stub',
+      providerId: 'stub',
+    }));
+    __setEmbedTransportForTests(
+      (async () => ({ embeddings: [Array.from({ length: 1536 }, () => 0.1)] })) as never,
+    );
+    try {
+      const { loadCorpus } = await import('../src/eval/brainbench/fixtures.ts');
+      const { runBrainBench } = await import('../src/eval/brainbench/harness.ts');
+      const corpus = await loadCorpus('evals/brainbench/fixtures', 'evals/brainbench/gold');
+      const sub = { ...corpus, fixtures: corpus.fixtures.filter((f) => f.fixture.fixture_id === 'wb-001-pricing-concern') };
+      const out = await runBrainBench(sub, {
+        harnesses: ['openclaw'], suites: ['write-back'], includeHoldout: true, llm: true, budgetUsd: 1,
+      });
+      const cell = out.cells.find((c) => c.suite === 'write-back');
+      expect(cell).toBeDefined();
+      expect(cell!.metrics.extraction_recall).toBeCloseTo(1 / 3);
+      expect(cell!.metrics.extraction_precision).toBe(1);
+    } finally {
+      __setChatTransportForTests(null);
+      __setEmbedTransportForTests(null);
+    }
+  });
+
   test('multi-segment conversations extract per segment (the 45-min gap splits)', async () => {
     await resetTables(engine);
     // gen-wb fixtures carry a deliberate >30min gap; use one.

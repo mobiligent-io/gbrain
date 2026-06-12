@@ -135,8 +135,10 @@ export interface EvalRunRecord {
    * v3 (BrainBench wave, decision 16): `mode` widened to `SearchMode | 'n/a'`
    * for search-mode-independent suites — brainbench runs once per sweep and
    * records 'n/a' instead of fabricating a mode. v2 records (mode always a
-   * SearchMode) parse fine under v3 readers; eval-compare renders 'n/a' rows
-   * un-grouped.
+   * SearchMode) parse fine under v3 readers. NOTE: eval-compare's markdown
+   * renderer iterates SEARCH_MODES only, so 'n/a' rows surface in its --json
+   * `records` output, not the mode table (review finding; markdown surfacing
+   * is a follow-up).
    */
   schema_version: 3;
   run_id: string;
