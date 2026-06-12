@@ -249,6 +249,11 @@ const PRUNE_DIR_NAMES = new Set<string>([
   'vendor',
   'dist',
   'build',
+  // Python venv: vendored dependency tree, the `node_modules` analogue (#2020).
+  // Like `node_modules` it lacks a leading dot so isSyncable's dot-prefix
+  // exclusion misses it; explicit entry keeps incremental sync consistent
+  // with the first-sync walker in commands/import.ts.
+  'venv',
   '.raw',
   'ops',
 ]);
