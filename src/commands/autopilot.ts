@@ -18,6 +18,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, utimesSync, unlinkSync } from 'fs';
+import { setCliExitVerdict } from '../core/cli-force-exit.ts';
 import { join } from 'path';
 import { execSync } from 'child_process';
 import type { BrainEngine } from '../core/engine.ts';
@@ -547,7 +548,7 @@ export async function runAutopilot(engine: BrainEngine, args: string[]) {
             `Exiting so launchd ThrottleInterval can apply backoff.`,
           );
           stopping = true;
-          process.exitCode = 1;
+          setCliExitVerdict(1);
           break;
         }
         if (autopilotReconnectFails >= AUTOPILOT_MAX_RECONNECT_FAILS) {
@@ -556,7 +557,7 @@ export async function runAutopilot(engine: BrainEngine, args: string[]) {
             `Last error: ${(e as Error).message ?? 'unknown'}. Exiting.`,
           );
           stopping = true;
-          process.exitCode = 1;
+          setCliExitVerdict(1);
           break;
         }
       }
