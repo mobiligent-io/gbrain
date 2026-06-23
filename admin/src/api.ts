@@ -33,6 +33,19 @@ async function apiFetchText(path: string) {
   return res.text();
 }
 
+async function connectFetch(path: string, options?: RequestInit) {
+  const res = await fetch(`${BASE}${path}`, {
+    ...options,
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message || body.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export const api = {
   login: (token: string) => apiFetch('/admin/login', { method: 'POST', body: JSON.stringify({ token }) }),
   signOutEverywhere: () => apiFetch('/admin/api/sign-out-everywhere', { method: 'POST' }),
@@ -52,4 +65,14 @@ export const api = {
     apiFetchText(`/admin/api/calibration/charts/${encodeURIComponent(type)}${holder ? `?holder=${encodeURIComponent(holder)}` : ''}`),
   // v0.41 D2 — live minion-jobs dashboard snapshot.
   jobsWatch: () => apiFetch('/admin/api/jobs/watch'),
+  mobibrainAdminTokens: () => apiFetch('/admin/api/mobibrain/tokens'),
+  disableMobibrainAdminToken: (id: string) =>
+    apiFetch(`/admin/api/mobibrain/tokens/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
+  deleteMobibrainAdminToken: (id: string) =>
+    apiFetch(`/admin/api/mobibrain/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  mobibrainConnectTokens: () => connectFetch('/connect/api/tokens'),
+  createMobibrainConnectToken: (input: { client: string; label?: string }) =>
+    connectFetch('/connect/api/tokens', { method: 'POST', body: JSON.stringify(input) }),
+  revokeMobibrainConnectToken: (id: string) =>
+    connectFetch(`/connect/api/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };

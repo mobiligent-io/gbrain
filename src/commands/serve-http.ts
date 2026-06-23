@@ -15,7 +15,7 @@ import type { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, createHash, randomUUID } from 'crypto';
 import { safeHexEqual } from '../core/timing-safe.ts';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -252,6 +252,102 @@ export function resolveCorsOrigin(allowlist: Set<string> | null): cors.CorsOptio
   return (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
     if (!origin) return cb(null, true);
     cb(null, allowlist.has(origin));
+  };
+}
+
+const MOBIBRAIN_CONNECT_ALLOWED_GROUPS = new Set(['general', 'platform_admin']);
+const MOBIBRAIN_CONNECT_TOKEN_MARKER = 'mobibrain-connect-self-service';
+const MOBIBRAIN_CONNECT_MCP_URL = 'https://brain.mobiligent.io/mcp';
+const MOBIBRAIN_CONNECT_DISABLED_TOOLS = [
+  'delete_page',
+  'forget_fact',
+  'reload_schema_pack',
+  'remove_link',
+  'remove_tag',
+  'restore_page',
+  'revert_version',
+  'run_onboard',
+  'run_skillopt',
+  'schema_apply_mutations',
+  'sources_add',
+  'sources_remove',
+];
+
+const MOBIBRAIN_CONNECT_CLIENTS = new Set(['codex', 'claude-code', 'claude-desktop', 'generic']);
+
+interface MobibrainConnectPrincipal {
+  email: string;
+  username: string;
+  groups: string[];
+}
+
+interface MobibrainConnectTokenRow {
+  id: string;
+  name: string;
+  created_at: string | Date;
+  last_used_at: string | Date | null;
+  revoked_at: string | Date | null;
+  permissions?: unknown;
+}
+
+function splitAuthentikGroups(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(/[,\s;|]+/)
+    .map(g => g.trim())
+    .filter(Boolean);
+}
+
+function readAuthentikPrincipal(req: Request): MobibrainConnectPrincipal | null {
+  const email = req.header('x-authentik-email')?.trim().toLowerCase();
+  if (!email || !email.endsWith('@mobiligent.io')) return null;
+  return {
+    email,
+    username: req.header('x-authentik-username')?.trim() || email,
+    groups: splitAuthentikGroups(req.header('x-authentik-groups')),
+  };
+}
+
+function hasMobibrainConnectAccess(principal: MobibrainConnectPrincipal): boolean {
+  return principal.groups.some(g => MOBIBRAIN_CONNECT_ALLOWED_GROUPS.has(g));
+}
+
+function sanitizeTokenNamePart(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/@/g, '-')
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64) || 'employee';
+}
+
+function parseMobibrainConnectPermissions(raw: unknown): Record<string, unknown> {
+  if (!raw) return {};
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  return raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : {};
+}
+
+function toMobibrainConnectToken(row: MobibrainConnectTokenRow) {
+  const permissions = parseMobibrainConnectPermissions(row.permissions);
+  return {
+    id: row.id,
+    name: row.name,
+    client: typeof permissions.client === 'string' ? permissions.client : 'generic',
+    status: row.revoked_at ? 'revoked' : 'active',
+    created_at: row.created_at,
+    last_used_at: row.last_used_at,
+    revoked_at: row.revoked_at,
   };
 }
 
@@ -507,6 +603,9 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
   const bootstrapHash = createHash('sha256').update(bootstrapToken).digest('hex');
   const suppressBootstrapPrint = options.suppressBootstrapToken === true;
   const adminSessions = new Map<string, number>(); // sessionId → expiresAt
+  const requireMobibrainPlatformAdmin = process.env.MOBIBRAIN_ADMIN_REQUIRE_PLATFORM_ADMIN === 'true';
+  const mobibrainAdminAuthentikAutoLogin = requireMobibrainPlatformAdmin
+    && process.env.MOBIBRAIN_ADMIN_AUTHENTIK_AUTO_LOGIN !== 'false';
 
   // SSE clients for live activity feed
   const sseClients = new Set<express.Response>();
@@ -760,8 +859,39 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
   // ---------------------------------------------------------------------------
   // v0.40 D15.5: safeHexEqual extracted to src/core/timing-safe.ts so the new
   // /webhooks/github HMAC verifier reuses the same constant-time compare.
+  function requireMobibrainPlatformAdminHeader(req: Request, res: Response, next: NextFunction) {
+    if (!requireMobibrainPlatformAdmin) {
+      next();
+      return;
+    }
+    const principal = readAuthentikPrincipal(req);
+    if (!principal) {
+      res.status(401).json({ error: 'authentik_login_required', message: 'Admin requires Authentik platform_admin.' });
+      return;
+    }
+    if (!principal.groups.includes('platform_admin')) {
+      res.status(403).json({ error: 'forbidden', message: 'Admin is restricted to platform_admin.' });
+      return;
+    }
+    next();
+  }
+
+  function checkMobibrainPlatformAdminHeader(req: Request, res: Response): boolean {
+    if (!requireMobibrainPlatformAdmin) return true;
+    const principal = readAuthentikPrincipal(req);
+    if (!principal) {
+      res.status(401).json({ error: 'authentik_login_required', message: 'Admin requires Authentik platform_admin.' });
+      return false;
+    }
+    if (!principal.groups.includes('platform_admin')) {
+      res.status(403).json({ error: 'forbidden', message: 'Admin is restricted to platform_admin.' });
+      return false;
+    }
+    return true;
+  }
+
   // POST /admin/login — JSON body with token (for programmatic/UI login)
-  app.post('/admin/login', express.json(), (req, res) => {
+  app.post('/admin/login', requireMobibrainPlatformAdminHeader, express.json(), (req, res) => {
     const token = req.body?.token;
     if (!token || typeof token !== 'string') {
       res.status(400).json({ error: 'Token required' });
@@ -854,7 +984,7 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
   // Browser hits it, server validates the nonce (exists + unconsumed +
   // unexpired), marks consumed, sets cookie, redirects to dashboard.
   // Rate-limited at 10/min/IP to harden against DoS via bad-token loops.
-  app.get('/admin/auth/:token', adminAuthRateLimiter, (req: Request, res: Response) => {
+  app.get('/admin/auth/:token', adminAuthRateLimiter, requireMobibrainPlatformAdminHeader, (req: Request, res: Response) => {
     const nonce = String(req.params.token ?? '');
     pruneExpiredNonces();
 
@@ -895,6 +1025,15 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
 
   // Admin auth middleware
   function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+    // MobiBrain production sits behind Authentik forward-auth. When the
+    // reverse proxy asserts a platform_admin user, treat that SSO identity
+    // as the admin login and skip GBrain's bootstrap-cookie ceremony.
+    if (mobibrainAdminAuthentikAutoLogin) {
+      if (!checkMobibrainPlatformAdminHeader(req, res)) return;
+      next();
+      return;
+    }
+
     const sessionId = (req.cookies as Record<string, string>)?.gbrain_admin;
     if (!sessionId || !adminSessions.has(sessionId)) {
       res.status(401).json({ error: 'Admin authentication required' });
@@ -906,8 +1045,137 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
       res.status(401).json({ error: 'Session expired' });
       return;
     }
+    if (requireMobibrainPlatformAdmin) {
+      if (!checkMobibrainPlatformAdminHeader(req, res)) return;
+    }
     next();
   }
+
+  function requireMobibrainConnectPrincipal(req: Request, res: Response): MobibrainConnectPrincipal | null {
+    const principal = readAuthentikPrincipal(req);
+    if (!principal) {
+      res.status(401).json({
+        error: 'authentik_login_required',
+        message: 'MobiBrain Connect requires Authentik login with a mobiligent.io account.',
+      });
+      return null;
+    }
+    if (!hasMobibrainConnectAccess(principal)) {
+      res.status(403).json({
+        error: 'forbidden',
+        message: 'MobiBrain Connect is available to general and platform_admin members.',
+      });
+      return null;
+    }
+    return principal;
+  }
+
+  async function listMobibrainConnectTokens(principal: MobibrainConnectPrincipal) {
+    const rows = await engine.executeRaw<MobibrainConnectTokenRow>(
+      `SELECT id, name, created_at, last_used_at, revoked_at, permissions
+         FROM access_tokens
+        WHERE permissions->>'managed_by' = $1
+          AND permissions->>'owner_email' = $2
+        ORDER BY created_at DESC`,
+      [MOBIBRAIN_CONNECT_TOKEN_MARKER, principal.email],
+    );
+    return rows.map(toMobibrainConnectToken);
+  }
+
+  app.get('/connect/api/tokens', async (req: Request, res: Response) => {
+    const principal = requireMobibrainConnectPrincipal(req, res);
+    if (!principal) return;
+
+    try {
+      const tokens = await listMobibrainConnectTokens(principal);
+      res.json({
+        principal,
+        tokens,
+        mcpUrl: process.env.MOBIBRAIN_PUBLIC_MCP_URL || MOBIBRAIN_CONNECT_MCP_URL,
+        allowedGroups: Array.from(MOBIBRAIN_CONNECT_ALLOWED_GROUPS),
+        disabledTools: MOBIBRAIN_CONNECT_DISABLED_TOOLS,
+      });
+    } catch (e) {
+      res.status(503).json({ error: e instanceof Error ? e.message : 'service_unavailable' });
+    }
+  });
+
+  app.post('/connect/api/tokens', express.json(), async (req: Request, res: Response) => {
+    const principal = requireMobibrainConnectPrincipal(req, res);
+    if (!principal) return;
+
+    const client = typeof req.body?.client === 'string' ? req.body.client : 'generic';
+    if (!MOBIBRAIN_CONNECT_CLIENTS.has(client)) {
+      res.status(400).json({ error: 'invalid_client', message: 'client must be codex, claude-code, claude-desktop, or generic.' });
+      return;
+    }
+
+    const label = typeof req.body?.label === 'string' ? sanitizeTokenNamePart(req.body.label) : '';
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    const owner = sanitizeTokenNamePart(principal.email);
+    const name = ['employee', owner, client, label, stamp].filter(Boolean).join('-').slice(0, 180);
+
+    try {
+      const { generateToken, hashToken } = await import('../core/utils.ts');
+      const token = generateToken('gbrain_');
+      const hash = hashToken(token);
+      const id = randomUUID();
+      const permissions = {
+        managed_by: MOBIBRAIN_CONNECT_TOKEN_MARKER,
+        owner_email: principal.email,
+        owner_username: principal.username,
+        owner_groups: principal.groups,
+        client,
+        takes_holders: ['world'],
+        mobibrain_namespace: 'general',
+        issued_via: '/connect',
+        disabled_tools_hint: MOBIBRAIN_CONNECT_DISABLED_TOOLS,
+      };
+
+      const [created] = await executeRawJsonb<MobibrainConnectTokenRow>(
+        engine,
+        `INSERT INTO access_tokens (id, name, token_hash, permissions)
+         VALUES ($1, $2, $3, $4::jsonb)
+         RETURNING id, name, created_at, last_used_at, revoked_at, permissions`,
+        [id, name, hash],
+        [permissions],
+      );
+
+      res.json({
+        token: toMobibrainConnectToken(created),
+        plainToken: token,
+        mcpUrl: process.env.MOBIBRAIN_PUBLIC_MCP_URL || MOBIBRAIN_CONNECT_MCP_URL,
+        disabledTools: MOBIBRAIN_CONNECT_DISABLED_TOOLS,
+      });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : 'Failed to create token' });
+    }
+  });
+
+  app.delete('/connect/api/tokens/:id', async (req: Request, res: Response) => {
+    const principal = requireMobibrainConnectPrincipal(req, res);
+    if (!principal) return;
+
+    try {
+      const rows = await engine.executeRaw<MobibrainConnectTokenRow>(
+        `UPDATE access_tokens
+            SET revoked_at = now()
+          WHERE id = $1
+            AND revoked_at IS NULL
+            AND permissions->>'managed_by' = $2
+            AND permissions->>'owner_email' = $3
+          RETURNING id, name, created_at, last_used_at, revoked_at, permissions`,
+        [String(req.params.id), MOBIBRAIN_CONNECT_TOKEN_MARKER, principal.email],
+      );
+      if (rows.length === 0) {
+        res.status(404).json({ error: 'not_found', message: 'No active self-service token found for this account.' });
+        return;
+      }
+      res.json({ revoked: true, token: toMobibrainConnectToken(rows[0]) });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : 'Failed to revoke token' });
+    }
+  });
 
   // ---------------------------------------------------------------------------
   // Admin API endpoints
@@ -947,6 +1215,101 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
       res.json([...oauthClients, ...legacyKeys]);
     } catch (e) {
       res.status(503).json({ error: 'service_unavailable' });
+    }
+  });
+
+  app.get('/admin/api/mobibrain/tokens', requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const rows = await engine.executeRaw(
+        `SELECT
+            a.id,
+            a.name,
+            a.created_at,
+            a.last_used_at,
+            a.revoked_at,
+            a.permissions,
+            CASE WHEN a.revoked_at IS NOT NULL THEN 'revoked' ELSE 'active' END AS status,
+            COALESCE((SELECT count(*)::int FROM mcp_request_log l WHERE l.token_name = a.name), 0) AS total_requests,
+            COALESCE((SELECT count(*)::int FROM mcp_request_log l WHERE l.token_name = a.name AND l.created_at > now() - interval '24 hours'), 0) AS requests_today,
+            COALESCE((SELECT count(*)::int FROM mcp_request_log l WHERE l.token_name = a.name AND l.status != 'success'), 0) AS total_errors,
+            COALESCE((SELECT count(*)::int FROM mcp_request_log l WHERE l.token_name = a.name AND l.status != 'success' AND l.created_at > now() - interval '24 hours'), 0) AS errors_today,
+            (SELECT max(l.created_at) FROM mcp_request_log l WHERE l.token_name = a.name) AS last_request_at
+          FROM access_tokens a
+         ORDER BY a.created_at DESC`,
+        [],
+      );
+
+      const tokens = rows.map(row => {
+        const permissions = parseMobibrainConnectPermissions(row.permissions);
+        return {
+          id: row.id,
+          name: row.name,
+          created_at: row.created_at,
+          last_used_at: row.last_used_at,
+          revoked_at: row.revoked_at,
+          status: row.status,
+          managed_by: typeof permissions.managed_by === 'string' ? permissions.managed_by : 'legacy',
+          owner_email: typeof permissions.owner_email === 'string' ? permissions.owner_email : null,
+          owner_username: typeof permissions.owner_username === 'string' ? permissions.owner_username : null,
+          client: typeof permissions.client === 'string' ? permissions.client : 'legacy',
+          namespace: typeof permissions.mobibrain_namespace === 'string' ? permissions.mobibrain_namespace : null,
+          total_requests: Number(row.total_requests ?? 0),
+          requests_today: Number(row.requests_today ?? 0),
+          total_errors: Number(row.total_errors ?? 0),
+          errors_today: Number(row.errors_today ?? 0),
+          last_request_at: row.last_request_at,
+        };
+      });
+
+      res.json({
+        tokens,
+        summary: {
+          total: tokens.length,
+          active: tokens.filter(t => t.status === 'active').length,
+          revoked: tokens.filter(t => t.status !== 'active').length,
+          requests_today: tokens.reduce((sum, t) => sum + t.requests_today, 0),
+          errors_today: tokens.reduce((sum, t) => sum + t.errors_today, 0),
+        },
+      });
+    } catch (e) {
+      res.status(503).json({ error: e instanceof Error ? e.message : 'service_unavailable' });
+    }
+  });
+
+  app.post('/admin/api/mobibrain/tokens/:id/disable', requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const rows = await engine.executeRaw(
+        `UPDATE access_tokens
+            SET revoked_at = COALESCE(revoked_at, now())
+          WHERE id = $1
+          RETURNING id, name, revoked_at`,
+        [String(req.params.id)],
+      );
+      if (rows.length === 0) {
+        res.status(404).json({ error: 'not_found' });
+        return;
+      }
+      res.json({ disabled: true, token: rows[0] });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : 'Failed to disable token' });
+    }
+  });
+
+  app.delete('/admin/api/mobibrain/tokens/:id', requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const rows = await engine.executeRaw(
+        `DELETE FROM access_tokens
+          WHERE id = $1
+          RETURNING id, name`,
+        [String(req.params.id)],
+      );
+      if (rows.length === 0) {
+        res.status(404).json({ error: 'not_found' });
+        return;
+      }
+      res.json({ deleted: true, token: rows[0] });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : 'Failed to delete token' });
     }
   });
 
@@ -1377,9 +1740,21 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
   const adminDistPath = path.join(process.cwd(), 'admin', 'dist');
   const useDevPath = fs.existsSync(adminDistPath);
   if (useDevPath) {
-    app.use('/admin', express.static(adminDistPath));
-    app.get('/admin/{*path}', (req: Request, res: Response, next: NextFunction) => {
+    app.use('/admin/assets', express.static(path.join(adminDistPath, 'assets')));
+    app.get('/admin', requireMobibrainPlatformAdminHeader, (_req: Request, res: Response) => {
+      res.sendFile(path.join(adminDistPath, 'index.html'));
+    });
+    app.get('/admin/{*path}', requireMobibrainPlatformAdminHeader, (req: Request, res: Response, next: NextFunction) => {
       if (req.path.startsWith('/admin/api/') || req.path === '/admin/events' || req.path === '/admin/login') {
+        return next();
+      }
+      res.sendFile(path.join(adminDistPath, 'index.html'));
+    });
+    app.get('/connect', (_req: Request, res: Response) => {
+      res.sendFile(path.join(adminDistPath, 'index.html'));
+    });
+    app.get('/connect/{*path}', (req: Request, res: Response, next: NextFunction) => {
+      if (req.path.startsWith('/connect/api/')) {
         return next();
       }
       res.sendFile(path.join(adminDistPath, 'index.html'));
@@ -1397,6 +1772,14 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
       cache.set(asset.path, buf);
       return buf;
     }
+    app.get('/admin', requireMobibrainPlatformAdminHeader, (_req: Request, res: Response) => {
+      if (ADMIN_INDEX_HTML) {
+        res.setHeader('Content-Type', ADMIN_INDEX_HTML.mime);
+        res.send(loadAsset(ADMIN_INDEX_HTML));
+        return;
+      }
+      res.status(404).send('admin SPA not available');
+    });
     app.get('/admin/{*path}', (req: Request, res: Response, next: NextFunction) => {
       if (req.path.startsWith('/admin/api/') || req.path === '/admin/events' || req.path === '/admin/login') {
         return next();
@@ -1409,12 +1792,29 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
       }
       // SPA fallback — every unmatched /admin/* route resolves to index.html
       // so client-side routing takes over (login, dashboard, agents, ...).
+      requireMobibrainPlatformAdminHeader(req, res, () => {
+        if (ADMIN_INDEX_HTML) {
+          res.setHeader('Content-Type', ADMIN_INDEX_HTML.mime);
+          res.send(loadAsset(ADMIN_INDEX_HTML));
+          return;
+        }
+        res.status(404).send('admin SPA not available');
+      });
+    });
+    const sendEmbeddedIndex = (res: Response) => {
       if (ADMIN_INDEX_HTML) {
         res.setHeader('Content-Type', ADMIN_INDEX_HTML.mime);
         res.send(loadAsset(ADMIN_INDEX_HTML));
         return;
       }
-      res.status(404).send('admin SPA not available');
+      res.status(404).send('connect SPA not available');
+    };
+    app.get('/connect', (_req: Request, res: Response) => sendEmbeddedIndex(res));
+    app.get('/connect/{*path}', (req: Request, res: Response, next: NextFunction) => {
+      if (req.path.startsWith('/connect/api/')) {
+        return next();
+      }
+      sendEmbeddedIndex(res);
     });
   }
 
