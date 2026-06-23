@@ -25,6 +25,8 @@ type CreatedToken = {
   disabledTools: string[];
 };
 
+type AutoOs = 'macos' | 'linux' | 'windows' | 'wsl';
+
 const clientOptions = [
   { value: 'codex', label: 'Codex Desktop/CLI' },
   { value: 'claude-code', label: 'Claude Code/CLI' },
@@ -32,9 +34,24 @@ const clientOptions = [
   { value: 'generic', label: '기타 MCP 클라이언트' },
 ];
 
+const autoOsOptions: { value: AutoOs; label: string }[] = [
+  { value: 'macos', label: 'macOS' },
+  { value: 'linux', label: 'Linux' },
+  { value: 'windows', label: 'Windows' },
+  { value: 'wsl', label: 'WSL' },
+];
+
 function formatDate(value: string | null) {
   if (!value) return 'never';
   return new Date(value).toLocaleString();
+}
+
+function detectAutoOs(): AutoOs {
+  if (typeof navigator === 'undefined') return 'macos';
+  const platform = `${navigator.platform || ''} ${navigator.userAgent || ''}`;
+  if (/Win/i.test(platform)) return 'windows';
+  if (/Linux/i.test(platform)) return 'linux';
+  return 'macos';
 }
 
 function CopyButton({ value, label = 'Copy' }: { value: string; label?: string }) {
@@ -71,6 +88,7 @@ export function MobiBrainConnectPage() {
   const [client, setClient] = useState('codex');
   const [label, setLabel] = useState('');
   const [created, setCreated] = useState<CreatedToken | null>(null);
+  const [autoOs, setAutoOs] = useState<AutoOs>(detectAutoOs);
 
   const reload = async () => {
     setLoading(true);
@@ -94,6 +112,25 @@ export function MobiBrainConnectPage() {
   }, [state?.disabledTools, created?.disabledTools]);
 
   const mcpUrl = state?.mcpUrl ?? created?.mcpUrl ?? 'https://brain.mobiligent.io/mcp';
+  const installOrigin = typeof window === 'undefined' ? 'https://brain.mobiligent.io' : window.location.origin;
+  const installerUrls = {
+    macos: `${installOrigin}/connect/install/macos.sh`,
+    linux: `${installOrigin}/connect/install/linux.sh`,
+    windows: `${installOrigin}/connect/install/windows.ps1`,
+    wsl: `${installOrigin}/connect/install/linux.sh`,
+  };
+  const autoInstallSnippets: Record<AutoOs, string> = {
+    macos: `curl -fsSL ${installerUrls.macos} | bash -s -- --client ${client} --force`,
+    linux: `curl -fsSL ${installerUrls.linux} | bash -s -- --client ${client} --force`,
+    windows: `$script = Join-Path $env:TEMP "install-mobibrain-windows.ps1"\nInvoke-RestMethod ${installerUrls.windows} -OutFile $script\nPowerShell -ExecutionPolicy Bypass -File $script -Client ${client} -Force`,
+    wsl: `curl -fsSL ${installerUrls.wsl} | bash -s -- --client ${client} --force`,
+  };
+  const autoInstallNotes: Record<AutoOs, string> = {
+    macos: '터미널에서 실행한다. 토큰을 물으면 위에서 복사한 gbrain_... 값을 붙여넣는다.',
+    linux: '사용자 계정의 shell에서 실행한다. 토큰 파일은 ~/.config/mobibrain/mcp.env에 저장된다.',
+    windows: 'PowerShell에서 실행한다. 토큰은 사용자 환경변수와 AppData 토큰 파일에 저장된다.',
+    wsl: 'Windows PowerShell이 아니라 WSL 배포판 안의 Linux shell에서 실행한다.',
+  };
   const envSnippet = `mkdir -p ~/.config/mobibrain\ncat > ~/.config/mobibrain/mcp.env <<'EOF'\nMOBIBRAIN_MCP_URL=${mcpUrl}\nMOBIBRAIN_REMOTE_TOKEN=<여기에 생성한 gbrain_... 토큰>\nEOF\nchmod 0600 ~/.config/mobibrain/mcp.env`;
   const codexSnippet = `set -a\n. ~/.config/mobibrain/mcp.env\nset +a\n\ncodex mcp add mobibrain \\\n  --url "$MOBIBRAIN_MCP_URL" \\\n  --bearer-token-env-var MOBIBRAIN_REMOTE_TOKEN`;
   const claudeCodeSnippet = `set -a\n. ~/.config/mobibrain/mcp.env\nset +a\n\nclaude mcp add mobibrain -t http \\\n  "$MOBIBRAIN_MCP_URL" \\\n  -H "Authorization: Bearer $MOBIBRAIN_REMOTE_TOKEN"`;
@@ -243,6 +280,36 @@ export function MobiBrainConnectPage() {
               <div className="connect-kicker">가이드</div>
               <h2 id="connect-guide-heading">사용 방법</h2>
               <p>토큰을 만든 뒤 로컬 Claude/Codex 클라이언트에 MobiBrain MCP를 연결한다.</p>
+            </section>
+
+            <section className="connect-section connect-stack">
+              <div>
+                <h2>자동 설정</h2>
+                <p>운영체제와 클라이언트를 선택한 뒤 명령을 실행한다. 스크립트가 토큰을 숨김 입력으로 요청한다.</p>
+              </div>
+              <div className="connect-auto-panel">
+                <div className="connect-os-tabs" role="tablist" aria-label="운영체제 선택">
+                  {autoOsOptions.map(option => (
+                    <button
+                      aria-selected={autoOs === option.value}
+                      className={`connect-os-tab ${autoOs === option.value ? 'active' : ''}`}
+                      key={option.value}
+                      onClick={() => setAutoOs(option.value)}
+                      role="tab"
+                      type="button"
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="connect-note">{autoInstallNotes[autoOs]}</p>
+                <CodeBlock value={autoInstallSnippets[autoOs]} />
+                <ul className="connect-rules connect-auto-rules">
+                  <li>토큰은 명령줄에 직접 넣지 않는다.</li>
+                  <li>Codex 설정에는 destructive tool 차단값이 자동으로 추가된다.</li>
+                  <li>Desktop 앱에서 env 전달이 막히면 아래 수동 설정 값을 앱 설정 화면에 직접 넣는다.</li>
+                </ul>
+              </div>
             </section>
 
             <section className="connect-section connect-stack">

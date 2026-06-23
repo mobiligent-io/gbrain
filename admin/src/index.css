@@ -580,6 +580,46 @@ label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
   font-size: 13px;
 }
 
+.connect-auto-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.connect-os-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.connect-os-tab {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-paper);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 800;
+  min-height: 36px;
+  padding: 8px 14px;
+  transition: all var(--duration-fast);
+}
+
+.connect-os-tab:hover {
+  border-color: var(--color-border-strong);
+  color: var(--text-primary);
+}
+
+.connect-os-tab.active {
+  background: var(--color-primary-default);
+  border-color: var(--color-primary-default);
+  color: var(--color-primary-foreground);
+}
+
+.connect-auto-rules {
+  margin-top: 0;
+}
+
 .connect-code {
   min-height: 44px;
   margin-top: 8px;

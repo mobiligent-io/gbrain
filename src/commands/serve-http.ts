@@ -15,6 +15,8 @@ import type { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import * as nodeFs from 'fs';
+import * as nodePath from 'path';
 import { randomBytes, createHash, randomUUID } from 'crypto';
 import { safeHexEqual } from '../core/timing-safe.ts';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -274,6 +276,11 @@ const MOBIBRAIN_CONNECT_DISABLED_TOOLS = [
 ];
 
 const MOBIBRAIN_CONNECT_CLIENTS = new Set(['codex', 'claude-code', 'claude-desktop', 'generic']);
+const MOBIBRAIN_CONNECT_INSTALLERS: Record<string, { filename: string; contentType: string }> = {
+  'linux.sh': { filename: 'install-mobibrain-linux.sh', contentType: 'text/x-shellscript; charset=utf-8' },
+  'macos.sh': { filename: 'install-mobibrain-macos.sh', contentType: 'text/x-shellscript; charset=utf-8' },
+  'windows.ps1': { filename: 'install-mobibrain-windows.ps1', contentType: 'text/plain; charset=utf-8' },
+};
 
 interface MobibrainConnectPrincipal {
   email: string;
@@ -349,6 +356,15 @@ function toMobibrainConnectToken(row: MobibrainConnectTokenRow) {
     last_used_at: row.last_used_at,
     revoked_at: row.revoked_at,
   };
+}
+
+function resolveMobibrainInstallerPath(filename: string): string | null {
+  const candidates = [
+    nodePath.resolve(process.cwd(), '..', '..', 'scripts', filename),
+    nodePath.resolve(process.cwd(), 'scripts', filename),
+    nodePath.resolve(process.cwd(), '..', 'scripts', filename),
+  ];
+  return candidates.find(candidate => nodeFs.existsSync(candidate)) || null;
 }
 
 interface ServeHttpOptions {
@@ -1175,6 +1191,22 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : 'Failed to revoke token' });
     }
+  });
+
+  app.get('/connect/install/:installer', (req: Request, res: Response) => {
+    const installer = MOBIBRAIN_CONNECT_INSTALLERS[String(req.params.installer)];
+    if (!installer) {
+      res.status(404).send('installer not found');
+      return;
+    }
+    const scriptPath = resolveMobibrainInstallerPath(installer.filename);
+    if (!scriptPath) {
+      res.status(404).send('installer not available');
+      return;
+    }
+    res.setHeader('Content-Type', installer.contentType);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(nodeFs.readFileSync(scriptPath, 'utf8'));
   });
 
   // ---------------------------------------------------------------------------
