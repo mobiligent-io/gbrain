@@ -239,6 +239,12 @@ export function MobiBrainConnectPage() {
               </table>
             </section>
 
+            <section className="connect-guide-title" aria-labelledby="connect-guide-heading">
+              <div className="connect-kicker">가이드</div>
+              <h2 id="connect-guide-heading">사용 방법</h2>
+              <p>토큰을 만든 뒤 로컬 Claude/Codex 클라이언트에 MobiBrain MCP를 연결한다.</p>
+            </section>
+
             <section className="connect-section connect-stack">
               <div>
                 <h2>1. 로컬 토큰 파일</h2>
@@ -278,7 +284,7 @@ export function MobiBrainConnectPage() {
                 <h2>3. 확인 프롬프트</h2>
                 <p>연결 뒤 새 대화에서 아래처럼 확인한다.</p>
               </div>
-              <CodeBlock value={'Search MobiBrain for Mobiligent and show the source page names.'} />
+              <CodeBlock value={'MobiBrain에서 Mobiligent를 검색하고, 답변에 사용한 출처 페이지 이름을 함께 알려주세요.'} />
             </section>
 
             <section className="connect-section connect-stack">
