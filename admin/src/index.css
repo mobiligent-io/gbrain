@@ -451,6 +451,62 @@ label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
   overflow: hidden;
 }
 
+.explore-run-panel {
+  margin-bottom: 18px;
+}
+
+.explore-run-header,
+.explore-run-step-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.explore-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.explore-run-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.explore-run-step {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  background: var(--color-bg-alt);
+  min-width: 0;
+}
+
+.explore-run-step .warning-bar {
+  margin-top: 8px;
+  word-break: break-word;
+}
+
+.explore-run-log {
+  margin: 12px 0 0;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-muted);
+  color: var(--text-primary);
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .explore-capabilities {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

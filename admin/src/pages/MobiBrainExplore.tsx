@@ -94,6 +94,27 @@ type ExploreResponse = {
   documents: ExploreDocument[];
 };
 
+type IndexingStep = {
+  key: string;
+  title: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  started_at: string | null;
+  finished_at: string | null;
+  exit_code: number | null;
+  output_tail: string;
+  error: string | null;
+};
+
+type IndexingRun = {
+  id: string;
+  status: 'running' | 'succeeded' | 'failed';
+  started_at: string;
+  finished_at: string | null;
+  steps: IndexingStep[];
+  output_tail: string;
+  error: string | null;
+};
+
 function formatNumber(value: number | null | undefined) {
   if (value === null || value === undefined) return '-';
   return value.toLocaleString();
@@ -123,12 +144,33 @@ function evidenceCount(doc: ExploreDocument) {
   return doc.source_links.length + doc.outgoing_link_count + doc.incoming_link_count;
 }
 
+function runStatusLabel(status: IndexingRun['status']) {
+  if (status === 'running') return '실행 중';
+  if (status === 'succeeded') return '완료';
+  return '실패';
+}
+
+function stepStatusLabel(status: IndexingStep['status']) {
+  if (status === 'pending') return '대기';
+  if (status === 'running') return '실행 중';
+  if (status === 'succeeded') return '완료';
+  return '실패';
+}
+
+function statusClass(status: IndexingRun['status'] | IndexingStep['status']) {
+  if (status === 'succeeded') return 'badge-success';
+  if (status === 'failed') return 'badge-danger';
+  return 'badge-read';
+}
+
 export function MobiBrainExplorePage() {
   const [data, setData] = useState<ExploreResponse | null>(null);
   const [query, setQuery] = useState('');
   const [namespace, setNamespace] = useState('all');
   const [section, setSection] = useState('all');
   const [error, setError] = useState('');
+  const [indexingRun, setIndexingRun] = useState<IndexingRun | null>(null);
+  const [runningAction, setRunningAction] = useState(false);
 
   const load = async () => {
     setError('');
@@ -139,9 +181,50 @@ export function MobiBrainExplorePage() {
     }
   };
 
+  const loadIndexingStatus = async () => {
+    try {
+      const response = await api.mobibrainIndexingRun();
+      setIndexingRun(response.run ?? null);
+      return response.run ?? null;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return null;
+    }
+  };
+
+  const runIndexing = async () => {
+    const ok = window.confirm(
+      '지금 MobiBrain 동기화/인덱싱을 실행할까요?\n\n'
+      + 'general projection 갱신, GBrain DB sync, extract, embedding을 순서대로 실행합니다. 실행 중에는 같은 작업을 중복 실행할 수 없습니다.',
+    );
+    if (!ok) return;
+
+    setRunningAction(true);
+    setError('');
+    try {
+      const response = await api.runMobibrainIndexing();
+      setIndexingRun(response.run ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunningAction(false);
+    }
+  };
+
   useEffect(() => {
     void load();
+    void loadIndexingStatus();
   }, []);
+
+  useEffect(() => {
+    if (indexingRun?.status !== 'running') return;
+    const timer = window.setInterval(() => {
+      void loadIndexingStatus().then(nextRun => {
+        if (nextRun && nextRun.status !== 'running') void load();
+      });
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [indexingRun?.status]);
 
   const namespaces = useMemo(() => data?.namespaces.map(item => item.namespace ?? 'general') ?? [], [data]);
   const sections = useMemo(() => data?.sections.map(item => item.section ?? 'uncategorized') ?? [], [data]);
@@ -167,6 +250,8 @@ export function MobiBrainExplorePage() {
     });
   }, [data?.documents, namespace, query, section]);
 
+  const isIndexingRunning = indexingRun?.status === 'running';
+
   return (
     <>
       <div className="page-header">
@@ -175,6 +260,14 @@ export function MobiBrainExplorePage() {
           <h1 className="page-title">인덱싱 현황</h1>
         </div>
         <div className="toolbar">
+          <button
+            className="btn btn-primary"
+            disabled={runningAction || isIndexingRunning}
+            onClick={runIndexing}
+            type="button"
+          >
+            {isIndexingRunning ? '실행 중' : '동기화/인덱싱 실행'}
+          </button>
           <button className="btn btn-secondary" onClick={load} type="button">Refresh</button>
         </div>
       </div>
@@ -194,6 +287,42 @@ export function MobiBrainExplorePage() {
           실제 통계는 현재 GBrain DB 인덱스 기준입니다. Indexed surface: {data?.sync_policy.indexed_surface ?? 'general projection'}
         </div>
       </div>
+
+      {indexingRun && (
+        <section className="explore-panel explore-run-panel">
+          <div className="explore-run-header">
+            <div>
+              <div className="section-title">수동 동기화/인덱싱 실행</div>
+              <div className="subtle">
+                general projection 갱신 후 GBrain sync, extract, embed를 순서대로 실행합니다.
+              </div>
+            </div>
+            <span className={`badge ${statusClass(indexingRun.status)}`}>{runStatusLabel(indexingRun.status)}</span>
+          </div>
+          <div className="explore-run-meta">
+            <span>시작 {formatDate(indexingRun.started_at)}</span>
+            <span>종료 {formatDate(indexingRun.finished_at)}</span>
+            <span className="mono">{indexingRun.id.slice(0, 8)}</span>
+          </div>
+          <div className="explore-run-steps">
+            {indexingRun.steps.map(step => (
+              <div className="explore-run-step" key={step.key}>
+                <div className="explore-run-step-title">
+                  <strong>{step.title}</strong>
+                  <span className={`badge ${statusClass(step.status)}`}>{stepStatusLabel(step.status)}</span>
+                </div>
+                <div className="subtle">
+                  {formatDate(step.started_at)} - {formatDate(step.finished_at)}
+                  {step.exit_code !== null ? ` / exit ${step.exit_code}` : ''}
+                </div>
+                {step.error && <div className="warning-bar">{step.error}</div>}
+              </div>
+            ))}
+          </div>
+          {indexingRun.error && <div className="warning-bar">{indexingRun.error}</div>}
+          {indexingRun.output_tail && <pre className="explore-run-log">{indexingRun.output_tail}</pre>}
+        </section>
+      )}
 
       <div className="metrics">
         <div className="metric">

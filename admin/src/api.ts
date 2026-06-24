@@ -66,6 +66,8 @@ export const api = {
   // v0.41 D2 — live minion-jobs dashboard snapshot.
   jobsWatch: () => apiFetch('/admin/api/jobs/watch'),
   mobibrainExplore: () => apiFetch('/admin/api/mobibrain/explore'),
+  mobibrainIndexingRun: () => apiFetch('/admin/api/mobibrain/indexing-run'),
+  runMobibrainIndexing: () => apiFetch('/admin/api/mobibrain/indexing-run', { method: 'POST' }),
   mobibrainAdminTokens: () => apiFetch('/admin/api/mobibrain/tokens'),
   disableMobibrainAdminToken: (id: string) =>
     apiFetch(`/admin/api/mobibrain/tokens/${encodeURIComponent(id)}/disable`, { method: 'POST' }),

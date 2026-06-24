@@ -15,6 +15,7 @@ import type { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import { spawn } from 'child_process';
 import * as nodeFs from 'fs';
 import * as nodePath from 'path';
 import { randomBytes, createHash, randomUUID } from 'crypto';
@@ -668,6 +669,208 @@ function buildMobibrainSampleQuestions(sections: Set<string>, firstTitle: string
   return [...new Set(questions)].slice(0, 6);
 }
 
+type MobibrainIndexingRunStatus = 'running' | 'succeeded' | 'failed';
+type MobibrainIndexingStepStatus = 'pending' | 'running' | 'succeeded' | 'failed';
+
+interface MobibrainIndexingStep {
+  key: string;
+  title: string;
+  status: MobibrainIndexingStepStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  exit_code: number | null;
+  output_tail: string;
+  error: string | null;
+}
+
+interface MobibrainIndexingRun {
+  id: string;
+  status: MobibrainIndexingRunStatus;
+  started_at: string;
+  finished_at: string | null;
+  steps: MobibrainIndexingStep[];
+  output_tail: string;
+  error: string | null;
+}
+
+const MOBIBRAIN_INDEX_OUTPUT_LIMIT = 16000;
+
+function appendOutputTail(current: string, chunk: string): string {
+  const next = `${current}${chunk}`;
+  return next.length > MOBIBRAIN_INDEX_OUTPUT_LIMIT
+    ? next.slice(next.length - MOBIBRAIN_INDEX_OUTPUT_LIMIT)
+    : next;
+}
+
+function createMobibrainIndexingRun(): MobibrainIndexingRun {
+  return {
+    id: randomUUID(),
+    status: 'running',
+    started_at: new Date().toISOString(),
+    finished_at: null,
+    error: null,
+    output_tail: '',
+    steps: [
+      { key: 'project', title: 'general projection 동기화', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
+      { key: 'ownership', title: 'projection 소유권 보정', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
+      { key: 'sync', title: 'GBrain DB sync', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
+      { key: 'extract', title: '링크/메타데이터 extract', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
+      { key: 'embed', title: 'stale chunk embedding', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
+    ],
+  };
+}
+
+function childEnv(extra: Record<string, string | undefined>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const [key, value] of Object.entries(extra)) {
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
+function optionalPositiveInteger(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function processRunsAsRoot(): boolean {
+  return typeof process.getuid === 'function' && process.getuid() === 0;
+}
+
+async function runMobibrainIndexingStep(
+  run: MobibrainIndexingRun,
+  stepKey: string,
+  command: string,
+  args: string[],
+  options: {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    uid?: number;
+    gid?: number;
+  },
+): Promise<void> {
+  const step = run.steps.find(item => item.key === stepKey);
+  if (!step) throw new Error(`Unknown indexing step: ${stepKey}`);
+
+  step.status = 'running';
+  step.started_at = new Date().toISOString();
+  const commandLine = `$ ${[command, ...args].map(part => (/\s/.test(part) ? JSON.stringify(part) : part)).join(' ')}\n`;
+  step.output_tail = appendOutputTail(step.output_tail, commandLine);
+  run.output_tail = appendOutputTail(run.output_tail, `[${step.title}]\n${commandLine}`);
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      uid: options.uid,
+      gid: options.gid,
+    });
+
+    const appendChunk = (chunk: Buffer) => {
+      const text = chunk.toString('utf8');
+      step.output_tail = appendOutputTail(step.output_tail, text);
+      run.output_tail = appendOutputTail(run.output_tail, text);
+    };
+
+    child.stdout?.on('data', appendChunk);
+    child.stderr?.on('data', appendChunk);
+    child.on('error', error => {
+      step.status = 'failed';
+      step.error = error.message;
+      step.finished_at = new Date().toISOString();
+      reject(error);
+    });
+    child.on('close', code => {
+      step.exit_code = code;
+      step.finished_at = new Date().toISOString();
+      if (code === 0) {
+        step.status = 'succeeded';
+        resolve();
+      } else {
+        step.status = 'failed';
+        step.error = `${step.title} exited with code ${code ?? 'unknown'}`;
+        reject(new Error(step.error));
+      }
+    });
+  });
+}
+
+async function executeMobibrainIndexingPipeline(run: MobibrainIndexingRun): Promise<void> {
+  const gbrainCwd = process.cwd();
+  const appRoot = nodePath.resolve(gbrainCwd, '..', '..');
+  const projectScript = process.env.MOBIBRAIN_PROJECT_SCRIPT
+    || nodePath.join(appRoot, 'scripts', 'project-gbrain-general.sh');
+  const brainRepoPath = process.env.BRAIN_REPO_PATH;
+  const syncRepoPath = process.env.GBRAIN_SYNC_REPO_PATH || brainRepoPath;
+  const databaseUrl = process.env.GBRAIN_DATABASE_URL || process.env.MOBIBRAIN_DATABASE_URL;
+
+  try {
+    if (!brainRepoPath) throw new Error('BRAIN_REPO_PATH is required for MobiBrain projection sync');
+    if (!syncRepoPath) throw new Error('GBRAIN_SYNC_REPO_PATH or BRAIN_REPO_PATH is required for GBrain sync');
+    if (!databaseUrl) throw new Error('GBRAIN_DATABASE_URL or MOBIBRAIN_DATABASE_URL is required for indexing');
+    if (!nodeFs.existsSync(projectScript)) throw new Error(`projection script not found: ${projectScript}`);
+
+    const projectionUid = optionalPositiveInteger(process.env.MOBIBRAIN_PROJECTION_UID) ?? 1000;
+    const projectionGid = optionalPositiveInteger(process.env.MOBIBRAIN_PROJECTION_GID) ?? 1000;
+    const shouldFixProjectionOwnership = processRunsAsRoot();
+    const projectionIdentity = shouldFixProjectionOwnership
+      ? { uid: projectionUid, gid: projectionGid }
+      : {};
+    const commonEnv = childEnv({
+      GBRAIN_HOME: process.env.GBRAIN_HOME || '/data/gbrain',
+      GBRAIN_DATABASE_URL: databaseUrl,
+      MOBIBRAIN_DATABASE_URL: databaseUrl,
+    });
+
+    let projectError: unknown = null;
+    try {
+      await runMobibrainIndexingStep(run, 'project', projectScript, [], {
+        cwd: appRoot,
+        env: childEnv({
+          ...commonEnv,
+          BRAIN_ROOT: brainRepoPath,
+          OUT_ROOT: syncRepoPath,
+          HOME: process.env.MOBIBRAIN_PROJECTION_HOME || '/tmp',
+        }),
+        ...projectionIdentity,
+      });
+    } catch (error) {
+      projectError = error;
+    }
+
+    if (shouldFixProjectionOwnership) {
+      await runMobibrainIndexingStep(run, 'ownership', 'chown', ['-R', `${projectionUid}:${projectionGid}`, syncRepoPath], {
+        cwd: appRoot,
+        env: commonEnv,
+      });
+    }
+    if (projectError) throw projectError;
+
+    const bunBin = process.execPath || 'bun';
+    await runMobibrainIndexingStep(run, 'sync', bunBin, ['run', 'src/cli.ts', 'sync', '--repo', syncRepoPath, '--no-pull', '--skip-failed', '--yes'], {
+      cwd: gbrainCwd,
+      env: commonEnv,
+    });
+    await runMobibrainIndexingStep(run, 'extract', bunBin, ['run', 'src/cli.ts', 'extract', '--stale'], {
+      cwd: gbrainCwd,
+      env: commonEnv,
+    });
+    await runMobibrainIndexingStep(run, 'embed', bunBin, ['run', 'src/cli.ts', 'embed', '--stale', '--yes'], {
+      cwd: gbrainCwd,
+      env: commonEnv,
+    });
+
+    run.status = 'succeeded';
+    run.finished_at = new Date().toISOString();
+  } catch (error) {
+    run.status = 'failed';
+    run.error = error instanceof Error ? error.message : String(error);
+    run.finished_at = new Date().toISOString();
+  }
+}
+
 /**
  * Skill-publishing status for the startup banner + operator nudge. When OFF,
  * connected agents (Codex / Claude Code / Perplexity / Cowork) cannot call
@@ -700,6 +903,7 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
   // than silently binding loopback only.
   const bind = options.bind ?? '127.0.0.1';
   const config = loadConfig() || { engine: 'pglite' as const };
+  let mobibrainIndexingRun: MobibrainIndexingRun | null = null;
 
   if (logFullParams) {
     console.error(
@@ -1488,6 +1692,22 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
     } catch (e) {
       res.status(503).json({ error: e instanceof Error ? e.message : 'service_unavailable' });
     }
+  });
+
+  app.get('/admin/api/mobibrain/indexing-run', requireAdmin, async (_req: Request, res: Response) => {
+    res.json({ run: mobibrainIndexingRun });
+  });
+
+  app.post('/admin/api/mobibrain/indexing-run', requireAdmin, async (_req: Request, res: Response) => {
+    if (mobibrainIndexingRun?.status === 'running') {
+      res.status(409).json({ error: 'indexing_already_running', run: mobibrainIndexingRun });
+      return;
+    }
+
+    const run = createMobibrainIndexingRun();
+    mobibrainIndexingRun = run;
+    void executeMobibrainIndexingPipeline(run);
+    res.status(202).json({ run });
   });
 
   app.get('/admin/api/mobibrain/explore', requireAdmin, async (_req: Request, res: Response) => {
