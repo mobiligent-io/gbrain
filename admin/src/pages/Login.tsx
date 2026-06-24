@@ -38,35 +38,23 @@ export function LoginPage({ onLogin }: { onLogin: () => void }) {
   return (
     <div className="login-page">
       <div className="login-box">
-        <div className="login-logo">GBrain</div>
+        <div className="login-logo">
+          <span className="brand-mark" aria-hidden="true" />
+          <span>
+            <span className="brand-title">MobiBrain</span>
+            <span className="brand-subtitle">GBrain Admin</span>
+          </span>
+        </div>
 
-        <div style={{
-          background: 'rgba(136, 170, 255, 0.08)',
-          border: '1px solid rgba(136, 170, 255, 0.2)',
-          borderRadius: 8,
-          padding: '14px 16px',
-          marginBottom: 20,
-          fontSize: 13,
-          lineHeight: 1.5,
-          color: 'var(--text-secondary)',
-        }}>
-          <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
-            🔒 This is a protected dashboard
+        <div className="login-callout">
+          <div className="login-callout-title">
+            This is a protected dashboard
           </div>
           Ask your AI agent for the admin login link:
-          <div style={{
-            background: 'rgba(0,0,0,0.3)',
-            borderRadius: 6,
-            padding: '8px 12px',
-            marginTop: 8,
-            fontFamily: 'var(--font-mono)',
-            fontSize: 12,
-            color: '#88aaff',
-            wordBreak: 'break-all',
-          }}>
+          <div className="login-command">
             "Give me the GBrain admin login link"
           </div>
-          <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+          <div className="login-hint">
             Each link is single-use. Your agent generates a fresh one each time.
           </div>
         </div>

@@ -19,7 +19,7 @@ function getPage(): Page {
 }
 
 export function App() {
-  const isConnectPage = window.location.pathname.startsWith('/connect');
+  const isConnectPage = window.location.pathname.startsWith('/connect') || window.location.pathname.startsWith('/admin/connect');
   const [page, setPage] = useState<Page>(getPage);
 
   useEffect(() => {
@@ -54,10 +54,17 @@ export function App() {
   };
 
   return (
-    <div className="app">
+    <div className="app" data-theme="camomile-ops" data-lang="ko">
       <nav className="sidebar">
-        <div className="sidebar-logo">GBrain</div>
+        <div className="sidebar-logo">
+          <span className="brand-mark" aria-hidden="true" />
+          <span>
+            <span className="brand-title">MobiBrain</span>
+            <span className="brand-subtitle">GBrain Admin</span>
+          </span>
+        </div>
         <div className="sidebar-nav">
+          <div className="nav-label">운영</div>
           <a className={`nav-item ${page === 'dashboard' ? 'active' : ''}`}
              onClick={() => navigate('dashboard')}>Dashboard</a>
           <a className={`nav-item ${page === 'agents' ? 'active' : ''}`}
@@ -66,6 +73,7 @@ export function App() {
              onClick={() => navigate('mobibrain')}>MobiBrain</a>
           <a className={`nav-item ${page === 'tokens' ? 'active' : ''}`}
              onClick={() => navigate('tokens')}>Tokens</a>
+          <div className="nav-label">진단</div>
           <a className={`nav-item ${page === 'log' ? 'active' : ''}`}
              onClick={() => navigate('log')}>Request Log</a>
           <a className={`nav-item ${page === 'calibration' ? 'active' : ''}`}
@@ -73,19 +81,10 @@ export function App() {
           <a className={`nav-item ${page === 'jobs' ? 'active' : ''}`}
              onClick={() => navigate('jobs')}>Jobs Watch</a>
         </div>
-        <div style={{ marginTop: 'auto', padding: '16px 12px', borderTop: '1px solid var(--border)' }}>
+        <div className="sidebar-footer">
           <button
+            className="btn btn-secondary sidebar-signout"
             onClick={handleSignOutEverywhere}
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--border)',
-              color: 'var(--text-secondary)',
-              padding: '6px 10px',
-              borderRadius: 6,
-              fontSize: 12,
-              cursor: 'pointer',
-              width: '100%',
-            }}
             title="Revoke every active admin session — every browser, every tab"
           >
             Sign out everywhere

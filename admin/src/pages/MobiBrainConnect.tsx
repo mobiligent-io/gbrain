@@ -54,7 +54,7 @@ function detectAutoOs(): AutoOs {
   return 'macos';
 }
 
-function CopyButton({ value, label = 'Copy' }: { value: string; label?: string }) {
+function CopyButton({ value, label = '복사' }: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -66,7 +66,7 @@ function CopyButton({ value, label = 'Copy' }: { value: string; label?: string }
       }}
       type="button"
     >
-      {copied ? 'Copied' : label}
+      {copied ? '복사됨' : label}
     </button>
   );
 }
@@ -168,6 +168,7 @@ export function MobiBrainConnectPage() {
           <div>
             <div className="connect-kicker">MobiBrain Connect</div>
             <h1>Claude/Codex 연결 토큰</h1>
+            <p className="connect-header-copy">직원별 토큰을 만들고 로컬 에이전트 클라이언트에 MobiBrain MCP를 연결한다.</p>
           </div>
           <div className="connect-endpoint mono">{mcpUrl}</div>
         </header>
@@ -213,7 +214,7 @@ export function MobiBrainConnectPage() {
                   />
                 </div>
                 <button className="btn btn-primary" disabled={creating} onClick={createToken} type="button">
-                  {creating ? 'Creating...' : 'Create Token'}
+                  {creating ? '생성 중...' : '토큰 만들기'}
                 </button>
               </div>
             </section>
@@ -225,7 +226,7 @@ export function MobiBrainConnectPage() {
                   <p>지금 이 화면에서만 볼 수 있다. 저장한 뒤 창을 닫는다.</p>
                 </div>
                 <div className="code-block connect-code connect-token">
-                  <CopyButton value={created.plainToken} label="Copy Token" />
+                  <CopyButton value={created.plainToken} label="토큰 복사" />
                   <pre>{created.plainToken}</pre>
                 </div>
               </section>
@@ -266,7 +267,7 @@ export function MobiBrainConnectPage() {
                       <td>
                         {token.status === 'active' && (
                           <button className="btn btn-danger" onClick={() => revokeToken(token)} type="button">
-                            Revoke
+                            폐기
                           </button>
                         )}
                       </td>
