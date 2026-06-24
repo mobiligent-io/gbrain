@@ -161,6 +161,11 @@ export function MobiBrainConnectPage() {
     }
   };
 
+  const signOut = () => {
+    if (!confirm('MobiBrain Connect에서 로그아웃할까요? 현재 브라우저의 Authentik 세션도 종료됩니다.')) return;
+    window.location.assign('/admin/logout?return_to=/connect');
+  };
+
   return (
     <main className="connect-page">
       <div className="connect-shell">
@@ -170,7 +175,12 @@ export function MobiBrainConnectPage() {
             <h1>Claude/Codex 연결 토큰</h1>
             <p className="connect-header-copy">직원별 토큰을 만들고 로컬 에이전트 클라이언트에 MobiBrain MCP를 연결한다.</p>
           </div>
-          <div className="connect-endpoint mono">{mcpUrl}</div>
+          <div className="connect-header-actions">
+            <div className="connect-endpoint mono">{mcpUrl}</div>
+            <button className="btn btn-secondary" onClick={signOut} type="button">
+              Sign out
+            </button>
+          </div>
         </header>
 
         {error && <div className="warning-bar">{error}</div>}

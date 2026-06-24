@@ -7,7 +7,12 @@
  * the rule can't drift without the suite catching it.
  */
 import { describe, test, expect } from 'bun:test';
-import { resolveBootstrapToken } from '../src/commands/serve-http.ts';
+import {
+  buildMobibrainLogoutRedirect,
+  normalizeMobibrainLogoutReturnTo,
+  resolveAuthentikEndSessionEndpoint,
+  resolveBootstrapToken,
+} from '../src/commands/serve-http.ts';
 
 describe('resolveBootstrapToken (v0.36.1.x #1024)', () => {
   test('unset env → generates a fresh token via the injected RNG', () => {
@@ -70,5 +75,40 @@ describe('resolveBootstrapToken (v0.36.1.x #1024)', () => {
   test('31 chars (one short) → error', () => {
     const r = resolveBootstrapToken('0123456789abcdef0123456789abcde'); // 31
     expect(r.kind).toBe('error');
+  });
+});
+
+describe('MobiBrain logout helpers', () => {
+  test('normalizes logout return targets to internal admin/connect routes', () => {
+    expect(normalizeMobibrainLogoutReturnTo('/admin')).toBe('/admin/');
+    expect(normalizeMobibrainLogoutReturnTo('/admin/')).toBe('/admin/');
+    expect(normalizeMobibrainLogoutReturnTo('/connect')).toBe('/connect');
+    expect(normalizeMobibrainLogoutReturnTo('https://evil.example/admin')).toBe('/admin/');
+    expect(normalizeMobibrainLogoutReturnTo('/connect/api/tokens')).toBe('/connect');
+  });
+
+  test('resolves Authentik end-session endpoint from issuer', () => {
+    expect(resolveAuthentikEndSessionEndpoint('https://auth.example/application/o/mobibrain/')).toBe(
+      'https://auth.example/application/o/mobibrain/end-session/',
+    );
+    expect(resolveAuthentikEndSessionEndpoint('not a url')).toBeNull();
+  });
+
+  test('builds Authentik logout redirect when issuer is configured', () => {
+    const redirect = buildMobibrainLogoutRedirect({
+      authentikIssuer: 'https://auth.example/application/o/mobibrain/',
+      clientId: 'client-123',
+      postLogoutRedirectUri: 'https://brain.example/admin/',
+    });
+    const url = new URL(redirect);
+    expect(url.origin + url.pathname).toBe('https://auth.example/application/o/mobibrain/end-session/');
+    expect(url.searchParams.get('client_id')).toBe('client-123');
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe('https://brain.example/admin/');
+  });
+
+  test('falls back to local redirect when Authentik issuer is absent', () => {
+    expect(buildMobibrainLogoutRedirect({ postLogoutRedirectUri: 'https://brain.example/connect' })).toBe(
+      'https://brain.example/connect',
+    );
   });
 });

@@ -93,6 +93,39 @@ export function resolveBootstrapToken(
   return { kind: 'ok', token: trimmed, fromEnv: true };
 }
 
+export function normalizeMobibrainLogoutReturnTo(raw: unknown): '/admin/' | '/connect' {
+  if (typeof raw !== 'string') return '/admin/';
+  const trimmed = raw.trim();
+  if (/^\/connect(?:[/?#]|$)/.test(trimmed)) return '/connect';
+  if (/^\/admin(?:[/?#]|$)/.test(trimmed)) return '/admin/';
+  return '/admin/';
+}
+
+export function resolveAuthentikEndSessionEndpoint(issuer: string | undefined): string | null {
+  const trimmed = issuer?.trim();
+  if (!trimmed) return null;
+  try {
+    return new URL('end-session/', trimmed.endsWith('/') ? trimmed : `${trimmed}/`).toString();
+  } catch {
+    return null;
+  }
+}
+
+export function buildMobibrainLogoutRedirect(input: {
+  authentikIssuer?: string;
+  clientId?: string;
+  postLogoutRedirectUri: string;
+}): string {
+  const endpoint = resolveAuthentikEndSessionEndpoint(input.authentikIssuer);
+  if (!endpoint) return input.postLogoutRedirectUri;
+  const url = new URL(endpoint);
+  url.searchParams.set('post_logout_redirect_uri', input.postLogoutRedirectUri);
+  if (input.clientId?.trim()) {
+    url.searchParams.set('client_id', input.clientId.trim());
+  }
+  return url.toString();
+}
+
 export type ProbeHealthResult =
   | { ok: true; status: 200; body: { status: 'ok'; version: string; engine: string; [k: string]: unknown } }
   | { ok: false; status: 503; body: { error: 'service_unavailable'; error_description: string } };
@@ -1296,6 +1329,19 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
     maxAge,
     path: '/admin',
   });
+  const adminCookieClear = (req: Request) => ({
+    httpOnly: true,
+    sameSite: 'strict' as const,
+    secure: req.secure || issuerUrl.protocol === 'https:',
+    path: '/admin',
+  });
+
+  function requestPublicOrigin(req: Request): string {
+    if (publicUrl) return new URL(publicUrl).origin;
+    const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0]?.trim();
+    const proto = forwardedProto || req.protocol;
+    return `${proto}://${req.get('host') || `localhost:${port}`}`;
+  }
 
   const authRouterOptions: any = {
     provider: oauthProvider,
@@ -1693,6 +1739,19 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
     const count = adminSessions.size;
     adminSessions.clear();
     res.json({ revoked_sessions: count });
+  });
+
+  app.get('/admin/logout', (req: Request, res: Response) => {
+    adminSessions.clear();
+    res.clearCookie('gbrain_admin', adminCookieClear(req));
+    const returnTo = normalizeMobibrainLogoutReturnTo(req.query.return_to);
+    const postLogoutRedirectUri = `${requestPublicOrigin(req)}${returnTo}`;
+    const redirectTo = buildMobibrainLogoutRedirect({
+      authentikIssuer: process.env.AUTHENTIK_OIDC_ISSUER,
+      clientId: process.env.AUTHENTIK_OIDC_CLIENT_ID,
+      postLogoutRedirectUri,
+    });
+    res.redirect(302, redirectTo);
   });
 
   app.get('/admin/api/agents', requireAdmin, async (_req: Request, res: Response) => {

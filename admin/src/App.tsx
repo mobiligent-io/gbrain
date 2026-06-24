@@ -8,7 +8,6 @@ import { JobsWatchPage } from './pages/JobsWatch';
 import { MobiBrainConnectPage } from './pages/MobiBrainConnect';
 import { MobiBrainExplorePage } from './pages/MobiBrainExplore';
 import { MobiBrainTokensPage } from './pages/MobiBrainTokens';
-import { api } from './api';
 
 type Page = 'login' | 'dashboard' | 'agents' | 'mobibrain' | 'tokens' | 'log' | 'calibration' | 'jobs';
 
@@ -41,16 +40,11 @@ export function App() {
     return <LoginPage onLogin={() => navigate('dashboard')} />;
   }
 
-  const handleSignOutEverywhere = async () => {
-    if (!confirm('Sign out every active admin session, including other browsers and tabs? Each one will need to re-authenticate via a fresh magic link.')) {
+  const handleSignOut = () => {
+    if (!confirm('MobiBrain에서 로그아웃할까요? 현재 브라우저의 Authentik 세션도 종료됩니다.')) {
       return;
     }
-    try {
-      await api.signOutEverywhere();
-    } catch {
-      // Even if the call fails, push to login — cookie is likely already invalid.
-    }
-    navigate('login');
+    window.location.assign('/admin/logout?return_to=/admin/');
   };
 
   return (
@@ -84,10 +78,10 @@ export function App() {
         <div className="sidebar-footer">
           <button
             className="btn btn-secondary sidebar-signout"
-            onClick={handleSignOutEverywhere}
-            title="Revoke every active admin session — every browser, every tab"
+            onClick={handleSignOut}
+            title="Sign out of MobiBrain and end the current Authentik browser session"
           >
-            Sign out everywhere
+            Sign out
           </button>
         </div>
       </nav>
