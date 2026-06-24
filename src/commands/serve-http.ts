@@ -712,8 +712,12 @@ function createMobibrainIndexingRun(): MobibrainIndexingRun {
     output_tail: '',
     steps: [
       { key: 'project', title: 'general projection 동기화', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
+      { key: 'project-extracts', title: 'extract projection 동기화', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
       { key: 'ownership', title: 'projection 소유권 보정', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
-      { key: 'sync', title: 'GBrain DB sync', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
+      { key: 'register-sources', title: 'extract source 등록', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
+      { key: 'sync', title: 'GBrain brain source sync', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
+      { key: 'sync-extract-general', title: 'GBrain extract general source sync', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
+      { key: 'sync-extract-sensitive', title: 'GBrain extract sensitive source sync', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
       { key: 'extract', title: '링크/메타데이터 extract', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
       { key: 'embed', title: 'stale chunk embedding', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
     ],
@@ -802,8 +806,17 @@ async function executeMobibrainIndexingPipeline(run: MobibrainIndexingRun): Prom
   const appRoot = nodePath.resolve(gbrainCwd, '..', '..');
   const projectScript = process.env.MOBIBRAIN_PROJECT_SCRIPT
     || nodePath.join(appRoot, 'scripts', 'project-gbrain-general.sh');
+  const extractProjectScript = process.env.MOBIBRAIN_EXTRACT_PROJECT_SCRIPT
+    || nodePath.join(appRoot, 'scripts', 'project-gbrain-extracts.sh');
+  const registerExtractSourcesScript = process.env.MOBIBRAIN_EXTRACT_SOURCE_REGISTER_SCRIPT
+    || nodePath.join(appRoot, 'scripts', 'register-gbrain-extract-sources.sh');
   const brainRepoPath = process.env.BRAIN_REPO_PATH;
   const syncRepoPath = process.env.GBRAIN_SYNC_REPO_PATH || brainRepoPath;
+  const extractRoot = process.env.EXTRACT_ROOT || '/srv/mobibrain/extracts';
+  const extractGeneralRepoPath = process.env.GBRAIN_EXTRACT_SYNC_REPO_PATH || '/srv/mobibrain/gbrain-extracts-general';
+  const extractSensitiveRepoPath = process.env.GBRAIN_EXTRACT_SENSITIVE_SYNC_REPO_PATH || '/srv/mobibrain/gbrain-extracts-sensitive';
+  const extractGeneralSourceId = process.env.GBRAIN_EXTRACT_SOURCE_ID || 'mobibrain-extracts-general';
+  const extractSensitiveSourceId = process.env.GBRAIN_EXTRACT_SENSITIVE_SOURCE_ID || 'mobibrain-extracts-sensitive';
   const databaseUrl = process.env.GBRAIN_DATABASE_URL || process.env.MOBIBRAIN_DATABASE_URL;
 
   try {
@@ -811,6 +824,8 @@ async function executeMobibrainIndexingPipeline(run: MobibrainIndexingRun): Prom
     if (!syncRepoPath) throw new Error('GBRAIN_SYNC_REPO_PATH or BRAIN_REPO_PATH is required for GBrain sync');
     if (!databaseUrl) throw new Error('GBRAIN_DATABASE_URL or MOBIBRAIN_DATABASE_URL is required for indexing');
     if (!nodeFs.existsSync(projectScript)) throw new Error(`projection script not found: ${projectScript}`);
+    if (!nodeFs.existsSync(extractProjectScript)) throw new Error(`extract projection script not found: ${extractProjectScript}`);
+    if (!nodeFs.existsSync(registerExtractSourcesScript)) throw new Error(`extract source registration script not found: ${registerExtractSourcesScript}`);
 
     const projectionUid = optionalPositiveInteger(process.env.MOBIBRAIN_PROJECTION_UID) ?? 1000;
     const projectionGid = optionalPositiveInteger(process.env.MOBIBRAIN_PROJECTION_GID) ?? 1000;
@@ -822,9 +837,14 @@ async function executeMobibrainIndexingPipeline(run: MobibrainIndexingRun): Prom
       GBRAIN_HOME: process.env.GBRAIN_HOME || '/data/gbrain',
       GBRAIN_DATABASE_URL: databaseUrl,
       MOBIBRAIN_DATABASE_URL: databaseUrl,
+      EXTRACT_ROOT: extractRoot,
+      GBRAIN_EXTRACT_SYNC_REPO_PATH: extractGeneralRepoPath,
+      GBRAIN_EXTRACT_SENSITIVE_SYNC_REPO_PATH: extractSensitiveRepoPath,
+      GBRAIN_EXTRACT_SOURCE_ID: extractGeneralSourceId,
+      GBRAIN_EXTRACT_SENSITIVE_SOURCE_ID: extractSensitiveSourceId,
     });
 
-    let projectError: unknown = null;
+    let projectionError: unknown = null;
     try {
       await runMobibrainIndexingStep(run, 'project', projectScript, [], {
         cwd: appRoot,
@@ -837,22 +857,66 @@ async function executeMobibrainIndexingPipeline(run: MobibrainIndexingRun): Prom
         ...projectionIdentity,
       });
     } catch (error) {
-      projectError = error;
+      projectionError = error;
+    }
+
+    try {
+      await runMobibrainIndexingStep(run, 'project-extracts', extractProjectScript, [], {
+        cwd: appRoot,
+        env: childEnv({
+          ...commonEnv,
+          HOME: process.env.MOBIBRAIN_PROJECTION_HOME || '/tmp',
+        }),
+        ...projectionIdentity,
+      });
+    } catch (error) {
+      projectionError ??= error;
     }
 
     if (shouldFixProjectionOwnership) {
-      await runMobibrainIndexingStep(run, 'ownership', 'chown', ['-R', `${projectionUid}:${projectionGid}`, syncRepoPath], {
-        cwd: appRoot,
-        env: commonEnv,
-      });
+      const projectionPaths = [syncRepoPath, extractGeneralRepoPath, extractSensitiveRepoPath]
+        .filter((path): path is string => Boolean(path) && nodeFs.existsSync(path));
+      await runMobibrainIndexingStep(
+        run,
+        'ownership',
+        projectionPaths.length > 0 ? 'chown' : 'sh',
+        projectionPaths.length > 0
+          ? ['-R', `${projectionUid}:${projectionGid}`, ...projectionPaths]
+          : ['-lc', 'echo "projection ownership skipped: no projection paths"'],
+        { cwd: appRoot, env: commonEnv },
+      );
     }
-    if (projectError) throw projectError;
+    if (projectionError) throw projectionError;
 
     const bunBin = process.execPath || 'bun';
+    await runMobibrainIndexingStep(run, 'register-sources', registerExtractSourcesScript, [], {
+      cwd: appRoot,
+      env: commonEnv,
+    });
     await runMobibrainIndexingStep(run, 'sync', bunBin, ['run', 'src/cli.ts', 'sync', '--repo', syncRepoPath, '--no-pull', '--skip-failed', '--yes'], {
       cwd: gbrainCwd,
       env: commonEnv,
     });
+    const extractGeneralRepoReady = nodeFs.existsSync(nodePath.join(extractGeneralRepoPath, '.git'));
+    await runMobibrainIndexingStep(
+      run,
+      'sync-extract-general',
+      extractGeneralRepoReady ? bunBin : 'sh',
+      extractGeneralRepoReady
+        ? ['run', 'src/cli.ts', 'sync', '--source', extractGeneralSourceId, '--no-pull', '--skip-failed', '--yes']
+        : ['-lc', 'echo "extract general sync skipped: no projection repo"'],
+      { cwd: extractGeneralRepoReady ? gbrainCwd : appRoot, env: commonEnv },
+    );
+    const extractSensitiveRepoReady = nodeFs.existsSync(nodePath.join(extractSensitiveRepoPath, '.git'));
+    await runMobibrainIndexingStep(
+      run,
+      'sync-extract-sensitive',
+      extractSensitiveRepoReady ? bunBin : 'sh',
+      extractSensitiveRepoReady
+        ? ['run', 'src/cli.ts', 'sync', '--source', extractSensitiveSourceId, '--no-pull', '--skip-failed', '--yes']
+        : ['-lc', 'echo "extract sensitive sync skipped: no projection repo"'],
+      { cwd: extractSensitiveRepoReady ? gbrainCwd : appRoot, env: commonEnv },
+    );
     await runMobibrainIndexingStep(run, 'extract', bunBin, ['run', 'src/cli.ts', 'extract', '--stale'], {
       cwd: gbrainCwd,
       env: commonEnv,
