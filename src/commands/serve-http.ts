@@ -711,6 +711,8 @@ function createMobibrainIndexingRun(): MobibrainIndexingRun {
     error: null,
     output_tail: '',
     steps: [
+      { key: 'pull-events', title: 'MobiShare event bridge pull', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
+      { key: 'pull-extracts', title: 'MobiShare extract bridge pull', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
       { key: 'project', title: 'general projection 동기화', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
       { key: 'project-extracts', title: 'extract projection 동기화', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
       { key: 'ownership', title: 'projection 소유권 보정', status: 'pending', started_at: null, finished_at: null, exit_code: null, output_tail: '', error: null },
@@ -810,6 +812,8 @@ async function executeMobibrainIndexingPipeline(run: MobibrainIndexingRun): Prom
     || nodePath.join(appRoot, 'scripts', 'project-gbrain-extracts.sh');
   const registerExtractSourcesScript = process.env.MOBIBRAIN_EXTRACT_SOURCE_REGISTER_SCRIPT
     || nodePath.join(appRoot, 'scripts', 'register-gbrain-extract-sources.sh');
+  const mobibrainCli = process.env.MOBIBRAIN_CLI
+    || nodePath.join(appRoot, 'bin', 'mobibrain.ts');
   const brainRepoPath = process.env.BRAIN_REPO_PATH;
   const syncRepoPath = process.env.GBRAIN_SYNC_REPO_PATH || brainRepoPath;
   const extractRoot = process.env.EXTRACT_ROOT || '/srv/mobibrain/extracts';
@@ -826,6 +830,7 @@ async function executeMobibrainIndexingPipeline(run: MobibrainIndexingRun): Prom
     if (!nodeFs.existsSync(projectScript)) throw new Error(`projection script not found: ${projectScript}`);
     if (!nodeFs.existsSync(extractProjectScript)) throw new Error(`extract projection script not found: ${extractProjectScript}`);
     if (!nodeFs.existsSync(registerExtractSourcesScript)) throw new Error(`extract source registration script not found: ${registerExtractSourcesScript}`);
+    if (!nodeFs.existsSync(mobibrainCli)) throw new Error(`MobiBrain CLI not found: ${mobibrainCli}`);
 
     const projectionUid = optionalPositiveInteger(process.env.MOBIBRAIN_PROJECTION_UID) ?? 1000;
     const projectionGid = optionalPositiveInteger(process.env.MOBIBRAIN_PROJECTION_GID) ?? 1000;
@@ -845,6 +850,23 @@ async function executeMobibrainIndexingPipeline(run: MobibrainIndexingRun): Prom
     });
 
     let projectionError: unknown = null;
+    await runMobibrainIndexingStep(run, 'pull-events', process.execPath || 'bun', [mobibrainCli, 'bridge', 'pull', '--brain', brainRepoPath], {
+      cwd: appRoot,
+      env: childEnv({
+        ...commonEnv,
+        HOME: process.env.MOBIBRAIN_PROJECTION_HOME || '/tmp',
+      }),
+      ...projectionIdentity,
+    });
+    await runMobibrainIndexingStep(run, 'pull-extracts', process.execPath || 'bun', [mobibrainCli, 'bridge', 'pull-extracts', '--brain', brainRepoPath, '--extracts', extractRoot], {
+      cwd: appRoot,
+      env: childEnv({
+        ...commonEnv,
+        HOME: process.env.MOBIBRAIN_PROJECTION_HOME || '/tmp',
+      }),
+      ...projectionIdentity,
+    });
+
     try {
       await runMobibrainIndexingStep(run, 'project', projectScript, [], {
         cwd: appRoot,

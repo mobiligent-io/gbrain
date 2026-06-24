@@ -195,7 +195,7 @@ export function MobiBrainExplorePage() {
   const runIndexing = async () => {
     const ok = window.confirm(
       '지금 MobiBrain 동기화/인덱싱을 실행할까요?\n\n'
-      + 'general projection 갱신, GBrain DB sync, extract, embedding을 순서대로 실행합니다. 실행 중에는 같은 작업을 중복 실행할 수 없습니다.',
+      + 'MobiShare event/extract bridge pull, general/extract projection 갱신, GBrain DB sync, extract, embedding을 순서대로 실행합니다. 실행 중에는 같은 작업을 중복 실행할 수 없습니다.',
     );
     if (!ok) return;
 
@@ -294,7 +294,7 @@ export function MobiBrainExplorePage() {
             <div>
               <div className="section-title">수동 동기화/인덱싱 실행</div>
               <div className="subtle">
-                general projection 갱신 후 GBrain sync, extract, embed를 순서대로 실행합니다.
+                MobiShare event/extract pull 후 general/extract projection, GBrain sync, extract, embed를 순서대로 실행합니다.
               </div>
             </div>
             <span className={`badge ${statusClass(indexingRun.status)}`}>{runStatusLabel(indexingRun.status)}</span>
