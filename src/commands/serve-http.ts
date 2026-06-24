@@ -486,6 +486,188 @@ export async function queryAgentClientSpend(engine: BrainEngine): Promise<AgentC
   }));
 }
 
+interface MobibrainExploreStatsRow {
+  page_count: number | string | null;
+  markdown_page_count: number | string | null;
+  code_page_count: number | string | null;
+  image_page_count: number | string | null;
+  chunk_count: number | string | null;
+  embedded_chunk_count: number | string | null;
+  text_chunk_count: number | string | null;
+  image_chunk_count: number | string | null;
+  timeline_entry_count: number | string | null;
+  link_count: number | string | null;
+  tag_count: number | string | null;
+  source_count: number | string | null;
+  stale_extraction_page_count: number | string | null;
+  latest_page_updated_at: string | Date | null;
+  latest_embedded_at: string | Date | null;
+}
+
+interface MobibrainExplorePageRow {
+  id: number | string;
+  source_id: string | null;
+  source_name: string | null;
+  slug: string;
+  title: string;
+  type: string;
+  page_kind: string;
+  frontmatter: unknown;
+  compiled_truth_text: string | null;
+  timeline_text: string | null;
+  updated_at: string | Date | null;
+  effective_date: string | Date | null;
+  last_retrieved_at: string | Date | null;
+  links_extracted_at: string | Date | null;
+  chunk_count: number | string | null;
+  embedded_chunk_count: number | string | null;
+  timeline_count: number | string | null;
+  outgoing_link_count: number | string | null;
+  incoming_link_count: number | string | null;
+  tags: unknown;
+}
+
+interface MobibrainExploreSourceRow {
+  id: string;
+  name: string;
+  local_path: string | null;
+  last_commit: string | null;
+  last_sync_at: string | Date | null;
+  newest_content_at: string | Date | null;
+  chunker_version: string | null;
+  archived: boolean | null;
+}
+
+interface MobibrainExploreCountRow {
+  name: string | null;
+  count: number | string | null;
+  chunk_count?: number | string | null;
+  embedded_chunk_count?: number | string | null;
+  latest_updated_at?: string | Date | null;
+}
+
+interface MobibrainExploreCheckpointRow {
+  op: string;
+  count: number | string | null;
+  latest_updated_at: string | Date | null;
+}
+
+function asNumber(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function asIsoDate(value: unknown): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  const parsed = new Date(String(value));
+  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parseJsonObject(parsed);
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function asStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  }
+  if (typeof value === 'string' && value.startsWith('{') && value.endsWith('}')) {
+    return value.slice(1, -1).split(',').map(item => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function mobibrainSectionFromSlug(slug: string): string {
+  return slug.split('/').find(Boolean) ?? 'uncategorized';
+}
+
+function mobibrainNamespace(frontmatter: Record<string, unknown>): string {
+  return typeof frontmatter.namespace === 'string' && frontmatter.namespace.trim()
+    ? frontmatter.namespace
+    : 'general';
+}
+
+function countMobibrainTimelineSignals(timeline: unknown): number {
+  if (typeof timeline !== 'string') return 0;
+  return timeline
+    .split('\n')
+    .filter(line => /^-\s+\d{4}-\d{2}-\d{2}\s+\[[^\]]+]\s+/.test(line.trim()) && line.includes(' -- src: '))
+    .length;
+}
+
+function buildMobibrainCapabilities(sections: Set<string>, timelineCount: number, linkCount: number) {
+  const capabilities = [
+    {
+      key: 'inventory',
+      title: '현재 인덱싱된 문서 확인',
+      description: 'GBrain DB에 들어온 page, chunk, embedding, timeline 상태를 운영자가 확인할 수 있습니다.',
+    },
+    {
+      key: 'evidence',
+      title: '근거 링크 기반 질의',
+      description: 'compiled truth와 timeline에 연결된 원본 링크를 기준으로 답변 근거를 추적합니다.',
+    },
+  ];
+  if (sections.has('projects')) {
+    capabilities.push({
+      key: 'projects',
+      title: '프로젝트/서비스 맥락 질의',
+      description: '프로젝트별 현재 상태, 운영 구조, 관련 결정과 증거를 함께 조회할 수 있습니다.',
+    });
+  }
+  if (sections.has('decisions')) {
+    capabilities.push({
+      key: 'decisions',
+      title: '운영 결정 이력 확인',
+      description: '결정 문서와 timeline 증거를 통해 왜 그렇게 운영하는지 확인할 수 있습니다.',
+    });
+  }
+  if (sections.has('deals') || sections.has('companies')) {
+    capabilities.push({
+      key: 'mobishare',
+      title: 'MobiShare 이벤트 신호 확인',
+      description: '발행, 공유, 조회 이벤트가 timeline 신호로 누적된 내용을 확인할 수 있습니다.',
+    });
+  }
+  if (timelineCount > 0) {
+    capabilities.push({
+      key: 'timeline',
+      title: '시간순 변경 이력 조회',
+      description: 'append-only timeline을 기준으로 최신 상태와 과거 변경 흐름을 구분할 수 있습니다.',
+    });
+  }
+  if (linkCount > 0) {
+    capabilities.push({
+      key: 'graph',
+      title: '관계형 탐색',
+      description: '문서 간 링크와 태그를 기반으로 연결된 프로젝트, 결정, 이벤트를 추적할 수 있습니다.',
+    });
+  }
+  return capabilities;
+}
+
+function buildMobibrainSampleQuestions(sections: Set<string>, firstTitle: string | null): string[] {
+  const questions = [
+    '현재 MobiBrain에 인덱싱된 문서와 최신 변경 시각을 요약해줘.',
+    '근거 링크와 timeline을 포함해서 최근 변경된 내용을 알려줘.',
+  ];
+  if (sections.has('projects')) questions.push('MobiBrain 프로젝트의 현재 운영 구조와 남은 리스크를 요약해줘.');
+  if (sections.has('decisions')) questions.push('OpenClaw 단일 런타임 결정의 근거와 현재 상태를 설명해줘.');
+  if (sections.has('deals')) questions.push('MobiShare에서 최근 반영된 deal 이벤트를 timeline 기준으로 정리해줘.');
+  if (firstTitle) questions.push(`${firstTitle} 문서에서 확인 가능한 사실과 근거 링크를 알려줘.`);
+  return [...new Set(questions)].slice(0, 6);
+}
+
 /**
  * Skill-publishing status for the startup banner + operator nudge. When OFF,
  * connected agents (Codex / Claude Code / Perplexity / Cowork) cannot call
@@ -1302,6 +1484,256 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
           requests_today: tokens.reduce((sum, t) => sum + t.requests_today, 0),
           errors_today: tokens.reduce((sum, t) => sum + t.errors_today, 0),
         },
+      });
+    } catch (e) {
+      res.status(503).json({ error: e instanceof Error ? e.message : 'service_unavailable' });
+    }
+  });
+
+  app.get('/admin/api/mobibrain/explore', requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const [statsRow] = await engine.executeRaw<MobibrainExploreStatsRow>(
+        `SELECT
+            (SELECT count(*)::int FROM pages p WHERE p.deleted_at IS NULL) AS page_count,
+            (SELECT count(*)::int FROM pages p WHERE p.deleted_at IS NULL AND p.page_kind = 'markdown') AS markdown_page_count,
+            (SELECT count(*)::int FROM pages p WHERE p.deleted_at IS NULL AND p.page_kind = 'code') AS code_page_count,
+            (SELECT count(*)::int FROM pages p WHERE p.deleted_at IS NULL AND p.page_kind = 'image') AS image_page_count,
+            (SELECT count(*)::int
+               FROM content_chunks c
+               JOIN pages p ON p.id = c.page_id
+              WHERE p.deleted_at IS NULL) AS chunk_count,
+            (SELECT count(*)::int
+               FROM content_chunks c
+               JOIN pages p ON p.id = c.page_id
+              WHERE p.deleted_at IS NULL
+                AND (c.embedding IS NOT NULL OR c.embedding_image IS NOT NULL OR c.embedding_multimodal IS NOT NULL)) AS embedded_chunk_count,
+            (SELECT count(*)::int
+               FROM content_chunks c
+               JOIN pages p ON p.id = c.page_id
+              WHERE p.deleted_at IS NULL AND c.modality = 'text') AS text_chunk_count,
+            (SELECT count(*)::int
+               FROM content_chunks c
+               JOIN pages p ON p.id = c.page_id
+              WHERE p.deleted_at IS NULL AND c.modality = 'image') AS image_chunk_count,
+            (SELECT count(*)::int
+               FROM timeline_entries te
+               JOIN pages p ON p.id = te.page_id
+              WHERE p.deleted_at IS NULL) AS timeline_entry_count,
+            (SELECT count(*)::int
+               FROM links l
+               JOIN pages p ON p.id = l.from_page_id
+              WHERE p.deleted_at IS NULL) AS link_count,
+            (SELECT count(*)::int
+               FROM tags t
+               JOIN pages p ON p.id = t.page_id
+              WHERE p.deleted_at IS NULL) AS tag_count,
+            (SELECT count(*)::int FROM sources s WHERE COALESCE(s.archived, false) = false) AS source_count,
+            (SELECT count(*)::int
+               FROM pages p
+              WHERE p.deleted_at IS NULL
+                AND (p.links_extracted_at IS NULL OR p.links_extracted_at < p.updated_at)) AS stale_extraction_page_count,
+            (SELECT max(p.updated_at) FROM pages p WHERE p.deleted_at IS NULL) AS latest_page_updated_at,
+            (SELECT max(c.embedded_at)
+               FROM content_chunks c
+               JOIN pages p ON p.id = c.page_id
+              WHERE p.deleted_at IS NULL) AS latest_embedded_at`,
+        [],
+      );
+
+      const pageRows = await engine.executeRaw<MobibrainExplorePageRow>(
+        `SELECT
+            p.id,
+            p.source_id,
+            s.name AS source_name,
+            p.slug,
+            p.title,
+            p.type,
+            p.page_kind,
+            p.frontmatter,
+            p.compiled_truth AS compiled_truth_text,
+            p.timeline AS timeline_text,
+            p.updated_at,
+            p.effective_date,
+            p.last_retrieved_at,
+            p.links_extracted_at,
+            COALESCE((SELECT count(*)::int FROM content_chunks c WHERE c.page_id = p.id), 0) AS chunk_count,
+            COALESCE((
+              SELECT count(*)::int FROM content_chunks c
+               WHERE c.page_id = p.id
+                 AND (c.embedding IS NOT NULL OR c.embedding_image IS NOT NULL OR c.embedding_multimodal IS NOT NULL)
+            ), 0) AS embedded_chunk_count,
+            COALESCE((SELECT count(*)::int FROM timeline_entries te WHERE te.page_id = p.id), 0) AS timeline_count,
+            COALESCE((SELECT count(*)::int FROM links l WHERE l.from_page_id = p.id), 0) AS outgoing_link_count,
+            COALESCE((SELECT count(*)::int FROM links l WHERE l.to_page_id = p.id), 0) AS incoming_link_count,
+            ARRAY(SELECT t.tag FROM tags t WHERE t.page_id = p.id ORDER BY t.tag) AS tags
+          FROM pages p
+          LEFT JOIN sources s ON s.id = p.source_id
+         WHERE p.deleted_at IS NULL
+         ORDER BY COALESCE(p.effective_date, p.updated_at) DESC, p.updated_at DESC, p.slug ASC
+         LIMIT 1000`,
+        [],
+      );
+
+      const namespaceRows = await engine.executeRaw<MobibrainExploreCountRow>(
+        `SELECT
+            COALESCE(NULLIF(p.frontmatter->>'namespace', ''), 'general') AS name,
+            count(DISTINCT p.id)::int AS count,
+            count(c.id)::int AS chunk_count,
+            count(c.id) FILTER (
+              WHERE c.embedding IS NOT NULL OR c.embedding_image IS NOT NULL OR c.embedding_multimodal IS NOT NULL
+            )::int AS embedded_chunk_count,
+            max(p.updated_at) AS latest_updated_at
+          FROM pages p
+          LEFT JOIN content_chunks c ON c.page_id = p.id
+         WHERE p.deleted_at IS NULL
+         GROUP BY 1
+         ORDER BY count DESC, name ASC`,
+        [],
+      );
+
+      const sectionRows = await engine.executeRaw<MobibrainExploreCountRow>(
+        `SELECT
+            COALESCE(NULLIF(split_part(p.slug, '/', 1), ''), 'uncategorized') AS name,
+            count(DISTINCT p.id)::int AS count,
+            count(c.id)::int AS chunk_count,
+            count(c.id) FILTER (
+              WHERE c.embedding IS NOT NULL OR c.embedding_image IS NOT NULL OR c.embedding_multimodal IS NOT NULL
+            )::int AS embedded_chunk_count,
+            max(p.updated_at) AS latest_updated_at
+          FROM pages p
+          LEFT JOIN content_chunks c ON c.page_id = p.id
+         WHERE p.deleted_at IS NULL
+         GROUP BY 1
+         ORDER BY count DESC, name ASC`,
+        [],
+      );
+
+      const sourceRows = await engine.executeRaw<MobibrainExploreSourceRow>(
+        `SELECT id, name, local_path, last_commit, last_sync_at, newest_content_at, chunker_version, archived
+           FROM sources
+          ORDER BY name ASC`,
+        [],
+      );
+
+      const checkpointRows = await engine.executeRaw<MobibrainExploreCheckpointRow>(
+        `SELECT op, count(*)::int AS count, max(updated_at) AS latest_updated_at
+           FROM op_checkpoints
+          GROUP BY op
+          ORDER BY op ASC`,
+        [],
+      );
+
+      const pageCount = asNumber(statsRow?.page_count);
+      const chunkCount = asNumber(statsRow?.chunk_count);
+      const embeddedChunkCount = asNumber(statsRow?.embedded_chunk_count);
+      const sections = sectionRows.map(row => ({
+        section: row.name ?? 'uncategorized',
+        page_count: asNumber(row.count),
+        chunk_count: asNumber(row.chunk_count),
+        embedded_chunk_count: asNumber(row.embedded_chunk_count),
+        latest_updated_at: asIsoDate(row.latest_updated_at),
+      }));
+      const sectionSet = new Set(sections.map(row => row.section));
+
+      const documents = pageRows.map(row => {
+        const frontmatter = parseJsonObject(row.frontmatter);
+        const section = mobibrainSectionFromSlug(row.slug);
+        const namespace = mobibrainNamespace(frontmatter);
+        const mobibrainTimelineCount = countMobibrainTimelineSignals(`${row.compiled_truth_text ?? ''}\n${row.timeline_text ?? ''}`);
+        const gbrainTimelineCount = asNumber(row.timeline_count);
+        return {
+          id: String(row.id),
+          source_id: row.source_id,
+          source_name: row.source_name ?? row.source_id ?? 'default',
+          slug: row.slug,
+          section,
+          namespace,
+          title: row.title,
+          type: row.type,
+          page_kind: row.page_kind,
+          sensitivity: typeof frontmatter.sensitivity === 'string' ? frontmatter.sensitivity : null,
+          updated_at: asIsoDate(row.updated_at),
+          effective_date: asIsoDate(row.effective_date),
+          last_retrieved_at: asIsoDate(row.last_retrieved_at),
+          links_extracted_at: asIsoDate(row.links_extracted_at),
+          chunk_count: asNumber(row.chunk_count),
+          embedded_chunk_count: asNumber(row.embedded_chunk_count),
+          timeline_count: gbrainTimelineCount,
+          mobibrain_timeline_count: mobibrainTimelineCount,
+          timeline_signal_count: gbrainTimelineCount + mobibrainTimelineCount,
+          outgoing_link_count: asNumber(row.outgoing_link_count),
+          incoming_link_count: asNumber(row.incoming_link_count),
+          tags: asStringArray(row.tags),
+          source_links: asStringArray(frontmatter.sources).slice(0, 4),
+        };
+      });
+      const mobibrainTimelineSignalCount = documents.reduce((sum, doc) => sum + doc.mobibrain_timeline_count, 0);
+
+      res.json({
+        generated_at: new Date().toISOString(),
+        document_limit: 1000,
+        sync_policy: {
+          indexed_surface: 'general projection',
+          mobishare_bridge_interval_minutes: 20,
+          gbrain_sync_interval_minutes: 15,
+          max_expected_latency_minutes: 35,
+          flow: [
+            'MobiShare immutable event object',
+            'MobiBrain bridge appends brain timeline',
+            'general projection is refreshed',
+            'GBrain sync/import and embed refresh DB index',
+          ],
+        },
+        summary: {
+          page_count: pageCount,
+          markdown_page_count: asNumber(statsRow?.markdown_page_count),
+          code_page_count: asNumber(statsRow?.code_page_count),
+          image_page_count: asNumber(statsRow?.image_page_count),
+          chunk_count: chunkCount,
+          embedded_chunk_count: embeddedChunkCount,
+          embedding_completion_ratio: chunkCount > 0 ? embeddedChunkCount / chunkCount : null,
+          text_chunk_count: asNumber(statsRow?.text_chunk_count),
+          image_chunk_count: asNumber(statsRow?.image_chunk_count),
+          timeline_entry_count: asNumber(statsRow?.timeline_entry_count),
+          mobibrain_timeline_signal_count: mobibrainTimelineSignalCount,
+          timeline_signal_count: asNumber(statsRow?.timeline_entry_count) + mobibrainTimelineSignalCount,
+          link_count: asNumber(statsRow?.link_count),
+          tag_count: asNumber(statsRow?.tag_count),
+          source_count: asNumber(statsRow?.source_count),
+          stale_extraction_page_count: asNumber(statsRow?.stale_extraction_page_count),
+          latest_page_updated_at: asIsoDate(statsRow?.latest_page_updated_at),
+          latest_embedded_at: asIsoDate(statsRow?.latest_embedded_at),
+        },
+        namespaces: namespaceRows.map(row => ({
+          namespace: row.name ?? 'general',
+          page_count: asNumber(row.count),
+          chunk_count: asNumber(row.chunk_count),
+          embedded_chunk_count: asNumber(row.embedded_chunk_count),
+          latest_updated_at: asIsoDate(row.latest_updated_at),
+        })),
+        sections,
+        sources: sourceRows.map(row => ({
+          id: row.id,
+          name: row.name,
+          local_path: row.local_path,
+          last_commit: row.last_commit,
+          last_sync_at: asIsoDate(row.last_sync_at),
+          newest_content_at: asIsoDate(row.newest_content_at),
+          chunker_version: row.chunker_version,
+          archived: Boolean(row.archived),
+        })),
+        checkpoints: checkpointRows.map(row => ({
+          op: row.op,
+          count: asNumber(row.count),
+          latest_updated_at: asIsoDate(row.latest_updated_at),
+        })),
+        capabilities: buildMobibrainCapabilities(
+          sectionSet,
+          asNumber(statsRow?.timeline_entry_count) + mobibrainTimelineSignalCount,
+          asNumber(statsRow?.link_count),
+        ),
+        sample_questions: buildMobibrainSampleQuestions(sectionSet, documents[0]?.title ?? null),
+        documents,
       });
     } catch (e) {
       res.status(503).json({ error: e instanceof Error ? e.message : 'service_unavailable' });

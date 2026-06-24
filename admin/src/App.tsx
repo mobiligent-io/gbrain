@@ -6,14 +6,15 @@ import { RequestLogPage } from './pages/RequestLog';
 import { CalibrationPage } from './pages/Calibration';
 import { JobsWatchPage } from './pages/JobsWatch';
 import { MobiBrainConnectPage } from './pages/MobiBrainConnect';
+import { MobiBrainExplorePage } from './pages/MobiBrainExplore';
 import { MobiBrainTokensPage } from './pages/MobiBrainTokens';
 import { api } from './api';
 
-type Page = 'login' | 'dashboard' | 'agents' | 'tokens' | 'log' | 'calibration' | 'jobs';
+type Page = 'login' | 'dashboard' | 'agents' | 'mobibrain' | 'tokens' | 'log' | 'calibration' | 'jobs';
 
 function getPage(): Page {
   const hash = window.location.hash.replace('#', '') || 'dashboard';
-  if (['login', 'dashboard', 'agents', 'tokens', 'log', 'calibration', 'jobs'].includes(hash)) return hash as Page;
+  if (['login', 'dashboard', 'agents', 'mobibrain', 'tokens', 'log', 'calibration', 'jobs'].includes(hash)) return hash as Page;
   return 'dashboard';
 }
 
@@ -61,6 +62,8 @@ export function App() {
              onClick={() => navigate('dashboard')}>Dashboard</a>
           <a className={`nav-item ${page === 'agents' ? 'active' : ''}`}
              onClick={() => navigate('agents')}>Agents</a>
+          <a className={`nav-item ${page === 'mobibrain' ? 'active' : ''}`}
+             onClick={() => navigate('mobibrain')}>MobiBrain</a>
           <a className={`nav-item ${page === 'tokens' ? 'active' : ''}`}
              onClick={() => navigate('tokens')}>Tokens</a>
           <a className={`nav-item ${page === 'log' ? 'active' : ''}`}
@@ -92,6 +95,7 @@ export function App() {
       <main className="main">
         {page === 'dashboard' && <DashboardPage />}
         {page === 'agents' && <AgentsPage />}
+        {page === 'mobibrain' && <MobiBrainExplorePage />}
         {page === 'tokens' && <MobiBrainTokensPage />}
         {page === 'log' && <RequestLogPage />}
         {page === 'calibration' && <CalibrationPage />}

@@ -65,6 +65,7 @@ export const api = {
     apiFetchText(`/admin/api/calibration/charts/${encodeURIComponent(type)}${holder ? `?holder=${encodeURIComponent(holder)}` : ''}`),
   // v0.41 D2 — live minion-jobs dashboard snapshot.
   jobsWatch: () => apiFetch('/admin/api/jobs/watch'),
+  mobibrainExplore: () => apiFetch('/admin/api/mobibrain/explore'),
   mobibrainAdminTokens: () => apiFetch('/admin/api/mobibrain/tokens'),
   disableMobibrainAdminToken: (id: string) =>
     apiFetch(`/admin/api/mobibrain/tokens/${encodeURIComponent(id)}/disable`, { method: 'POST' }),
