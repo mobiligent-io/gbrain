@@ -41,6 +41,35 @@ const autoOsOptions: { value: AutoOs; label: string }[] = [
   { value: 'wsl', label: 'WSL' },
 ];
 
+const companyInterfaces = [
+  {
+    title: 'Google Chat',
+    meta: 'CEO / CXO 스페이스',
+    body: '회사 공용 대화 채널에서 @MobiBrain을 멘션해 문서 검색, 인덱싱 상태, 출처 확인을 요청한다.',
+    detail: 'CEO는 platform_admin, CXO는 general 권한으로 응답 범위가 나뉜다.',
+  },
+  {
+    title: 'Claude Desktop Extension',
+    meta: '개인 PC의 Claude Desktop',
+    body: 'Claude Desktop에서 MobiBrain MCP를 확장으로 연결해 로컬 작업 중 회사 지식 검색을 사용한다.',
+    detail: '이 페이지에서 만든 개인 토큰을 Extension 설정에 넣는다.',
+  },
+  {
+    title: 'Claude Code / Codex',
+    meta: '개발자 CLI와 Desktop 앱',
+    body: '터미널이나 Codex 앱에서 MobiBrain MCP를 등록해 코드 작업 중 회사 지식을 조회한다.',
+    detail: '자동 설정 스크립트가 토큰 파일과 MCP 등록을 처리한다.',
+  },
+];
+
+const claudeDesktopSteps = [
+  '이 페이지에서 클라이언트를 Claude Desktop으로 선택하고 토큰을 만든다.',
+  'Claude Desktop을 열고 Settings > Extensions로 이동한다.',
+  '회사에서 배포한 MobiBrain Extension 파일이 있으면 설치한다. 메뉴가 Integrations로 표시되면 Add Integration을 사용한다.',
+  'MCP URL에는 아래 endpoint를, 인증 방식에는 Bearer Token을 넣는다.',
+  '생성된 gbrain_... 토큰을 붙여 넣고 저장한 뒤 새 대화를 연다.',
+];
+
 function formatDate(value: string | null) {
   if (!value) return 'never';
   return new Date(value).toLocaleString();
@@ -134,6 +163,9 @@ export function MobiBrainConnectPage() {
   const envSnippet = `mkdir -p ~/.config/mobibrain\ncat > ~/.config/mobibrain/mcp.env <<'EOF'\nMOBIBRAIN_MCP_URL=${mcpUrl}\nMOBIBRAIN_REMOTE_TOKEN=<여기에 생성한 gbrain_... 토큰>\nEOF\nchmod 0600 ~/.config/mobibrain/mcp.env`;
   const codexSnippet = `set -a\n. ~/.config/mobibrain/mcp.env\nset +a\n\ncodex mcp add mobibrain \\\n  --url "$MOBIBRAIN_MCP_URL" \\\n  --bearer-token-env-var MOBIBRAIN_REMOTE_TOKEN`;
   const claudeCodeSnippet = `set -a\n. ~/.config/mobibrain/mcp.env\nset +a\n\nclaude mcp add mobibrain -t http \\\n  "$MOBIBRAIN_MCP_URL" \\\n  -H "Authorization: Bearer $MOBIBRAIN_REMOTE_TOKEN"`;
+  const claudeDesktopSnippet = `Extension name: MobiBrain\nMCP URL: ${mcpUrl}\nAuthentication: Bearer Token\nToken: <이 페이지에서 생성한 gbrain_... 토큰>`;
+  const googleChatPrompt = `@MobiBrain MobiShare에 오늘 등록된 문서 중 CXO 채널에서 볼 수 있는 내용을 출처와 함께 요약해주세요.`;
+  const claudeDesktopPrompt = `MobiBrain에서 Mobiligent를 검색하고, 답변에 사용한 출처 페이지 이름을 함께 알려주세요.`;
 
   const createToken = async () => {
     setCreating(true);
@@ -290,13 +322,68 @@ export function MobiBrainConnectPage() {
             <section className="connect-guide-title" aria-labelledby="connect-guide-heading">
               <div className="connect-kicker">가이드</div>
               <h2 id="connect-guide-heading">사용 방법</h2>
-              <p>토큰을 만든 뒤 로컬 Claude/Codex 클라이언트에 MobiBrain MCP를 연결한다.</p>
+              <p>모빌리전트에서 MobiBrain을 쓰는 기본 인터페이스는 Google Chat과 Claude Desktop Extension이다.</p>
+            </section>
+
+            <section className="connect-section connect-stack">
+              <div>
+                <h2>어디에서 쓰나요?</h2>
+                <p>회사 공용 질의는 Google Chat, 개인 PC 작업은 Claude Desktop Extension을 우선 사용한다.</p>
+              </div>
+              <div className="connect-interface-grid">
+                {companyInterfaces.map(item => (
+                  <article className="connect-interface-card" key={item.title}>
+                    <div className="connect-interface-meta">{item.meta}</div>
+                    <h3>{item.title}</h3>
+                    <p>{item.body}</p>
+                    <span>{item.detail}</span>
+                  </article>
+                ))}
+              </div>
+            </section>
+
+            <section className="connect-section connect-stack connect-primary-guide">
+              <div>
+                <h2>Claude Desktop Extension 빠른 설정</h2>
+                <p>비개발자는 이 순서만 따라 하면 된다. 토큰은 본인 계정으로 만든 값만 사용한다.</p>
+              </div>
+              <div className="connect-step-panel">
+                <ol className="connect-steps">
+                  {claudeDesktopSteps.map(step => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+                <CodeBlock value={claudeDesktopSnippet} />
+                <div className="connect-callout">
+                  <strong>설치 후 확인</strong>
+                  <p>Claude Desktop 새 대화에서 아래 문장을 그대로 보내고, 답변에 출처가 함께 나오는지 확인한다.</p>
+                  <CodeBlock value={claudeDesktopPrompt} />
+                </div>
+              </div>
+            </section>
+
+            <section className="connect-section connect-stack">
+              <div>
+                <h2>Google Chat에서 쓰기</h2>
+                <p>CEO/CXO 스페이스에서는 별도 토큰을 만들지 않는다. 스페이스에서 MobiBrain을 멘션한다.</p>
+              </div>
+              <div className="connect-chat-panel">
+                <div className="connect-chat-row">
+                  <span className="badge badge-read">CEO</span>
+                  <p>platform_admin 권한으로 restricted/sensitive 내용을 포함해 조회할 수 있다.</p>
+                </div>
+                <div className="connect-chat-row">
+                  <span className="badge badge-read">CXO</span>
+                  <p>general 권한으로 공개 문서와 general 허용 restricted 문서만 조회할 수 있다.</p>
+                </div>
+                <CodeBlock value={googleChatPrompt} />
+              </div>
             </section>
 
             <section className="connect-section connect-stack">
               <div>
                 <h2>자동 설정</h2>
-                <p>운영체제와 클라이언트를 선택한 뒤 명령을 실행한다. 스크립트가 토큰을 숨김 입력으로 요청한다.</p>
+                <p>Claude Code, Codex, 터미널 중심 사용자는 운영체제와 클라이언트를 선택한 뒤 명령을 실행한다.</p>
               </div>
               <div className="connect-auto-panel">
                 <div className="connect-os-tabs" role="tablist" aria-label="운영체제 선택">
@@ -351,10 +438,10 @@ export function MobiBrainConnectPage() {
 
             <section className="connect-section connect-stack">
               <div>
-                <h2>2C. Claude Desktop</h2>
-                <p>Settings &gt; Integrations에서 remote MCP URL과 bearer token을 등록한다.</p>
+                <h2>2C. Claude Desktop Extension</h2>
+                <p>Settings &gt; Extensions에서 MobiBrain Extension을 설치하고 MCP URL과 bearer token을 등록한다.</p>
               </div>
-              <CodeBlock value={`URL: ${mcpUrl}\nAuthorization: Bearer <생성한 gbrain_... 토큰>`} />
+              <CodeBlock value={claudeDesktopSnippet} />
             </section>
 
             <section className="connect-section connect-stack">
@@ -362,7 +449,7 @@ export function MobiBrainConnectPage() {
                 <h2>3. 확인 프롬프트</h2>
                 <p>연결 뒤 새 대화에서 아래처럼 확인한다.</p>
               </div>
-              <CodeBlock value={'MobiBrain에서 Mobiligent를 검색하고, 답변에 사용한 출처 페이지 이름을 함께 알려주세요.'} />
+              <CodeBlock value={claudeDesktopPrompt} />
             </section>
 
             <section className="connect-section connect-stack">
