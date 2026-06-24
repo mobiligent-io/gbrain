@@ -915,7 +915,7 @@ async function executeMobibrainIndexingPipeline(run: MobibrainIndexingRun): Prom
       cwd: appRoot,
       env: commonEnv,
     });
-    await runMobibrainIndexingStep(run, 'sync', bunBin, ['run', 'src/cli.ts', 'sync', '--repo', syncRepoPath, '--no-pull', '--skip-failed', '--yes'], {
+    await runMobibrainIndexingStep(run, 'sync', bunBin, ['run', 'src/cli.ts', 'sync', '--source', 'default', '--repo', syncRepoPath, '--no-pull', '--skip-failed', '--yes'], {
       cwd: gbrainCwd,
       env: commonEnv,
     });
